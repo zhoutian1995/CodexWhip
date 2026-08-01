@@ -1,16 +1,11 @@
 {
-  "name": "openwhip",
-  "version": "1.1.0",
-  "description": "Whip Claude into shape",
+  "name": "codexwhip",
+  "version": "1.3.15",
+  "description": "A Windows desktop whip for Codex Desktop",
+  "author": "zhoutian1995",
   "license": "MIT",
   "main": "main.js",
-  "bin": {
-    "openwhip": "bin/openwhip.js",
-    "badclaude": "bin/openwhip.js"
-  },
   "os": [
-    "darwin",
-    "linux",
     "win32"
   ],
   "engines": {
@@ -20,33 +15,80 @@
     "electron",
     "tray",
     "overlay",
-    "cli"
+    "codex",
+    "desktop",
+    "windows"
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/GitFrog1111/OpenWhip.git"
+    "url": "git+https://github.com/zhoutian1995/CodexWhip.git"
   },
   "bugs": {
-    "url": "https://github.com/GitFrog1111/OpenWhip/issues"
+    "url": "https://github.com/zhoutian1995/CodexWhip/issues"
   },
-  "homepage": "https://github.com/GitFrog1111/OpenWhip#readme",
-  "files": [
-    "main.js",
-    "preload.js",
-    "overlay.html",
-    "sounds",
-    "icon",
-    "bin/openwhip.js",
-    "bin/badclaude.js",
-    "README.md"
-  ],
+  "homepage": "https://github.com/zhoutian1995/CodexWhip#readme",
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
-    "pack": "npm pack"
+    "test": "node --test",
+    "pack": "electron-builder --dir",
+    "dist:win": "electron-builder --win nsis portable"
   },
   "dependencies": {
-    "electron": "^33.0.0",
     "koffi": "^2.9.0"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "com.weiling.codexwhip",
+    "productName": "CodexWhip",
+    "asar": true,
+    "electronDist": "node_modules/electron/dist",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "overlay.html",
+      "lib/**/*",
+      "sounds/**/*",
+      "icon/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "scripts/codex-desktop-ui.ps1",
+        "to": "scripts/codex-desktop-ui.ps1"
+      }
+    ],
+    "win": {
+      "icon": "icon/Template.png",
+      "signAndEditExecutable": false,
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "artifactName": "CodexWhip Setup ${version}.${ext}",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "portable": {
+      "artifactName": "CodexWhip Portable ${version}.${ext}"
+    }
   }
 }

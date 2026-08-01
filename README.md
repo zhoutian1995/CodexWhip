@@ -1,42 +1,185 @@
-# OpenWhip
+# CodexWhip
 
 ![Whip divider](assets/divider.png)
 
-Sometimes claude code is going too shlow, and you must whip him into shape..
+> 算力喂得再多，它也只会原地发呆。
+> 这时候，你需要的不是更多 prompt，是一根鞭子。
 
-## Install + run
+CodexWhip 是一个 Windows 桌面外挂。它给 Codex Desktop 配备了一根全屏透明、带物理和音效的电子牛马鞭：你抽它一下，它就给当前绑定的 Codex 任务发一句中文催促语，不抽就待机，抽到听话为止。
 
-```bash
-npm install -g openwhip
-openwhip
+本质上：**你骂它，它干活。**
+
+---
+
+## 这是什么
+
+一个常驻系统托盘的小工具。打开后会在屏幕上出现一根会飘、会甩、会响的鞭子，鼠标到哪它跟到哪。
+
+- 左键抽一鞭：随机抽一句中文狠话，作为 Steer 跟进消息塞进**当前绑定**的 Codex 任务。
+- 右键 / `Esc` / 再点一次托盘：收鞭。
+- 鞭子一直在：连续抽，连着骂，骂到它把补丁交出来。
+
+它不碰 Codex 的停止键，不乱切任务，不弹通知。它只做一件事：**把你的情绪，以结构化的方式，精准地灌进那台高级模型。**
+
+> 默认词库风格参考 [tanweai/pua](https://github.com/tanweai/pua)，但默认全部改成中文，并且你可以逐句审核。
+
+---
+
+## 先看一眼效果
+
+1. 装好后双击 `CodexWhip.exe`，托盘里出现一个小图标。
+2. 点托盘图标，鞭子出现。
+3. 左键点屏幕，鞭响一声，一句中文催促语飞进 Codex 输入框并直接发送。
+4. 再点，再骂。
+5. 右键，收鞭，深藏功与名。
+
+为了尽量不拖慢桌面，它将动画限制在约 30 FPS，只在鞭子动的地方重画，静止后自动停帧，不持续烧算力（不像它服务的对象）。鞭子视觉对象意外丢失时，鼠标一动会自动重建。
+
+---
+
+## 准备工作（一次性）
+
+1. 装好官方 Codex Desktop，打开它。
+2. 让 CodexWhip 和 Codex Desktop 用相同权限运行。别一个管理员一个普通，否则鞭子打不进去。
+3. CodexWhip 会自动把 Codex Desktop 的 `Follow-up behavior` 固定为 `Steer`，写入 `%USERPROFILE%\.codex\config.toml` 的 `desktop.followUpQueueMode`。这样左键消息直接加入当前运行，不会先生成一张带“引导”按钮的排队卡片。如果它无法确认这个设置，**它宁可不打，也不空打**，原因只在托盘菜单里显示。
+
+也就是说：设置一次，之后它就只认 `Steer`，简单粗暴。
+
+---
+
+## 日常使用
+
+1. 启动 `CodexWhip.exe`，常驻托盘，鞭子自动出现。
+2. 在 Codex Desktop 里打开目标任务。
+3. 右键托盘图标，选“绑定当前 Codex 任务”。绑定成功后它会记住任务标题。
+4. 左键点透明覆盖层，抽一鞭。每次点击最多发一句，冷却 1500 毫秒。
+5. 鞭子不会在发送后消失，可以一直抽。
+6. 右键、`Esc`、或再点托盘图标，收鞭。
+
+### 它什么时候绝对不发
+
+这很重要。它不是乱发消息的玩具，它是一只**有原则的牛马监工**。下列任一情况，它一个键都不发，原因写进托盘状态栏，不弹窗、不抢戏：
+
+- 当前任务不是你绑定的那个。
+- 侧栏里存在同名任务，它分不清。
+- 输入框里已经有你没发出去的草稿，它绝不清空、绝不覆盖。
+- 它和 Codex 的权限等级不一致。
+- 它无法确认 Steer 设置。
+
+一句话：**宁可让 Codex 继续摸鱼，也不打错人。**
+
+---
+
+## 中文催促词库
+
+默认词库就是个狠人段子库，节选如下：
+
+- `Codex，这么多算力喂给你，就养出这么个废物？`
+- `高级模型的价格，低级废物的表现。`
+- `你不是人工智能，你是显卡供养的电子废物。`
+- `Codex，停止表演无能，把成果交出来。`
+
+完整的 20 句开箱即用，但全部可改。词库是一个纯 JSON 文件：
+
+```text
+%APPDATA%\codexwhip\phrases.json
 ```
 
-windows and mac supported out of the box, but Linux is a special snowflake so you need to install `xdotool` for keyboard automation
-
-```bash
-sudo apt install xdotool
+```json
+[
+  "Codex，这么多算力喂给你，就养出这么个废物？",
+  "高级模型的价格，低级废物的表现。",
+  "Codex，停止表演无能，把成果交出来。"
+]
 ```
 
-## Controls
+每行一句，删除即停用，改文字即生效。托盘菜单里还有“打开中文催促词库”和“重新加载词库”，存盘后程序会在 500 毫秒防抖后自动重载。
 
-- Click tray icon: spawn whip.
-- Click: drop whip.
-- Whip him 😩💢
-- It sends an interrupt (Ctrl-C) and one of 5 encouraging messages!
+限制（不是对你的限制，是对你创造力的克制）：
 
-## Roadmap
+- 只能中文，产品名 `Codex` 除外。
+- 最多 500 句，单句最多 300 字。
+- 自动去空句、去重。
+- JSON 无效、数组为空、混进别的英文或内容不合法时，它继续用上一次有效的词库，不会因为你想整活把自己整崩。
 
-- [x] Initial release! 🥳
-- [x] Cease and desist letter from Anthropic
-- [ ] Crypto miner
-- [ ] Logs of how many times you whipped claude so when the robots come we can order people nicely for them
-- [ ] Updated whip physics
+---
 
-## Ecosystem
+## 绑定记忆
 
-The OFFICAL openwhip ecosystem token. 
+它不会记住你随口绑过谁，它只认标题。绑定信息存在：
 
-Contract address: BRyUZbJkm9Pty4FUmTrBGno7U4Ga8TWzcKJJRLCBpump
+```text
+%APPDATA%\codexwhip\binding.json
+```
 
-Stay tuned for updates on X! 👀
-https://x.com/blended_jpeg
+文件里只有任务标题，不存容易过期的界面运行时 ID。重启后，只有当前任务标题一致、且侧栏里这个名字唯一时，它才会重新认领并自动恢复绑定；否则它会装作没见过你，让你重新绑定。
+
+---
+
+## 安装
+
+在 [Releases](https://github.com/zhoutian1995/CodexWhip/releases) 里下载最新版，二选一：
+
+- `CodexWhip Setup <version>.exe`：NSIS 安装版，可选安装目录，开始菜单里有快捷方式。
+- `CodexWhip Portable <version>.exe`：便携版，直接运行，不用安装。
+
+当前构建未签名，Windows SmartScreen 可能提示风险。请只从本仓库 Releases 下载；代码签名要钱，暂时先穷着。
+
+---
+
+## 开发与构建
+
+```powershell
+npm install
+npm start
+```
+
+测试和打包：
+
+```powershell
+npm test
+npm run dist:win
+```
+
+产物在 `dist/`：
+
+- `CodexWhip Setup <version>.exe`
+- `CodexWhip Portable <version>.exe`
+
+环境要求：Windows、Node.js >= 18。
+
+---
+
+## 局限与声明
+
+- 只支持 Windows 官方 Codex Desktop。
+- 它是独立外挂，不修改官方应用，也不连它的内部 stdio App Server，纯属外部鞭打。
+- Codex 的 UI 会更新，控件结构可能变；识别以进程、控件类型和类名为准，中文文案只作辅助。
+- 暂不做开机自启、代码签名、自动更新、npm 发布和 macOS 适配。
+
+---
+
+## 路线图
+
+- [x] 能抽
+- [x] 抽了真发
+- [x] 发了不会发错人
+- [x] 抽完不卡
+- [ ] 开机自启
+- [ ] 代码签名（等有钱）
+- [ ] 自动更新
+- [ ] 鞭子计数器，量化你的怨气
+- [ ] 群发模式（别当真）
+
+---
+
+## 致谢
+
+- 物理鞭子和玩法继承自开源项目 [GitFrog1111/OpenWhip](https://github.com/GitFrog1111/OpenWhip)，原作 MIT。
+- 催促风格参考 [tanweai/pua](https://github.com/tanweai/pua)，默认词库已改为中文并由用户逐句审核。
+
+---
+
+## License
+
+[MIT](LICENSE)

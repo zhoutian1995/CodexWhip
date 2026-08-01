@@ -16,7 +16,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 const P = {
   // Rope structure
-  segments:       28,     // number of chain links
+  segments:       24,     // number of chain links
   segmentLength:  25,     // base length of each link (px)
   taper:          0.6,   // tip segment is this fraction of base length
 
@@ -24,7 +24,7 @@ const P = {
   gravity:        1.2,   // normal gravity
   dropGravity:    0.95,    // gravity when dropping/despawning
   damping:        0.96,  // velocity retention per frame (1 = no loss)
-  constraintIters:20,     // higher = stiffer chain
+  constraintIters:6,      // enough stiffness without burning a full CPU core
   maxStretchRatio: 1.2,  // hard cap for per-link stretch during fast whips
 
   // Dynamic handle aim (target angle + restoring spring, not static lock)
@@ -48,11 +48,6 @@ const P = {
   wallBounce:      0.42,   // velocity retained after wall hit
   wallFriction:    0.86,   // tangential damping on wall hit
 
-  // Crack detection
-  crackSpeed:     340,     // tip velocity threshold to trigger crack
-  crackCooldownMs:200,   // min ms between cracks
-  firstCrackGraceMs: 350, // no crack (macro) until this long after spawn
-
   // Visuals
   lineWidthHandle: 7,      // rope thickness near handle
   lineWidthTip:    5,      // rope thickness near tip
@@ -69,34 +64,103 @@ const P = {
 // ══════════════════════════════════════════════════════════════════════════════
 
 const canvas = document.getElementById('c');
-const ctx = canvas.getContext('2d');
+const ctx = canvas.getContext('2d', { alpha: true });
 let W, H;
+let previousDrawBounds = null;
 
-function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
+function fillHitSurface(x, y, width, height) {
+  ctx.fillStyle = `rgba(0,0,0,${P.bgAlpha})`;
+  ctx.fillRect(x, y, width, height);
+}
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  previousDrawBounds = null;
+  fillHitSurface(0, 0, W, H);
+}
 resize();
-window.addEventListener('resize', resize);
+window.addEventListener('resize', () => {
+  resize();
+  scheduleFrame();
+});
 
 let mouseX = 0, mouseY = 0;
 let prevMouseX = 0, prevMouseY = 0;
 let whip = null;
 let dropping = false;
-let lastCrackTime = 0;
-let whipSpawnTime = 0;
+let closing = false;
 let handleAngle = P.baseTargetAngle;
 let handleAngVel = 0;
+let crackPulse = 0;
+let lastWhipRequestAt = 0;
+let lastCrackResult = { status: 'idle' };
+let leftWhipPending = false;
 
 const WHIP_CRACK_SOUNDS = ['sounds/A.mp3', 'sounds/B.mp3', 'sounds/C.mp3', 'sounds/D.mp3', 'sounds/E.mp3'];
-
-document.addEventListener('mousemove', e => { mouseX = e.clientX; mouseY = e.clientY; });
-document.addEventListener('mousedown', () => {
-  if (whip && !dropping) dropping = true;
+const WHIP_CRACK_AUDIO = WHIP_CRACK_SOUNDS.map(src => {
+  const audio = new Audio(src);
+  audio.preload = 'auto';
+  audio.load();
+  return audio;
 });
+const LOCAL_SEND_COOLDOWN_MS = 1500;
+const MOTION_EPSILON = 0.12;
+const MAX_IDLE_PHYSICS_FRAMES = 90;
+const SETTLE_FRAMES = 4;
+const TARGET_FRAME_INTERVAL_MS = 1000 / 30;
+
+document.addEventListener('mousemove', e => {
+  mouseX = e.clientX;
+  mouseY = e.clientY;
+  if (!whip && !dropping && !closing) resetWhipState(mouseX, mouseY);
+  scheduleFrame();
+}, { passive: true });
+document.addEventListener('mousedown', event => {
+  if (!whip && !dropping && !closing) {
+    resetWhipState(event.clientX, event.clientY);
+  }
+  if (!whip || dropping || closing) return;
+  if (event.button === 2) {
+    leftWhipPending = false;
+    startDropping();
+    return;
+  }
+  if (event.button !== 0) return;
+
+  triggerCrackAnimation();
+  scheduleFrame();
+  const now = Date.now();
+  if (now - lastWhipRequestAt < LOCAL_SEND_COOLDOWN_MS) {
+    leftWhipPending = false;
+    return;
+  }
+  leftWhipPending = true;
+  playCrackSound();
+});
+
+document.addEventListener('mouseup', event => {
+  if (event.button !== 0 || !leftWhipPending) return;
+  leftWhipPending = false;
+  lastWhipRequestAt = Date.now();
+  setTimeout(() => {
+    if (!whip || dropping) return;
+  window.bridge.whipCrack()
+    .then(result => {
+      lastCrackResult = result || { status: 'failed', code: 'EMPTY_RESPONSE' };
+      document.body.dataset.whipStatus = lastCrackResult.status;
+    })
+    .catch(() => {
+      lastCrackResult = { status: 'failed', code: 'IPC_FAILED' };
+      document.body.dataset.whipStatus = lastCrackResult.status;
+    });
+  }, 500);
+});
+document.addEventListener('contextmenu', event => event.preventDefault());
 
 // ── Whip creation ───────────────────────────────────────────────────────────
 function spawnWhip(mx, my) {
   dropping = false;
-  lastCrackTime = 0;
-  whipSpawnTime = Date.now();
   const pts = [];
   for (let i = 0; i < P.segments; i++) {
     const t = i / (P.segments - 1);
@@ -106,6 +170,35 @@ function spawnWhip(mx, my) {
     pts.push({ x, y, px: x, py: y });
   }
   return pts;
+}
+
+function refreshWhipSurface() {
+  ctx.clearRect(0, 0, W, H);
+  fillHitSurface(0, 0, W, H);
+  previousDrawBounds = null;
+  scheduleFrame();
+}
+
+function resetWhipState(mx, my) {
+  const anchorX = Number.isFinite(mx) ? clamp(mx, 0, W) : W / 2;
+  const anchorY = Number.isFinite(my) ? clamp(my, 0, H) : H / 2;
+  mouseX = anchorX;
+  mouseY = anchorY;
+  whip = spawnWhip(anchorX, anchorY);
+  dropping = false;
+  closing = false;
+  prevMouseX = anchorX;
+  prevMouseY = anchorY;
+  handleAngle = P.baseTargetAngle;
+  handleAngVel = 0;
+  crackPulse = 0;
+  lastWhipRequestAt = 0;
+  lastCrackResult = { status: 'idle' };
+  leftWhipPending = false;
+  document.body.dataset.whipStatus = 'idle';
+  idlePhysicsFrames = 0;
+  settleFrames = 0;
+  refreshWhipSurface();
 }
 
 function segLen(i) {
@@ -161,10 +254,36 @@ const wrapPi = a => {
 };
 
 function playCrackSound() {
-  if (!WHIP_CRACK_SOUNDS.length) return;
-  const src = WHIP_CRACK_SOUNDS[Math.floor(Math.random() * WHIP_CRACK_SOUNDS.length)];
-  const a = new Audio(src);
-  a.play().catch(() => {});
+  if (!WHIP_CRACK_AUDIO.length) return;
+  const audio = WHIP_CRACK_AUDIO[Math.floor(Math.random() * WHIP_CRACK_AUDIO.length)];
+  audio.currentTime = 0;
+  audio.play().catch(() => {});
+}
+
+function triggerCrackAnimation() {
+  if (!whip || dropping) return;
+  crackPulse = 1;
+  const normalAngle = handleAngle + Math.PI / 2;
+  for (let i = 1; i < whip.length; i++) {
+    const t = i / (whip.length - 1);
+    const kick = 4 + 24 * t * t;
+    const p = whip[i];
+    p.px = p.x - Math.cos(normalAngle) * kick;
+    p.py = p.y - Math.sin(normalAngle) * kick;
+  }
+}
+
+function startDropping() {
+  if (whip && !dropping) {
+    closing = true;
+    dropping = true;
+    scheduleFrame();
+    return;
+  }
+  if (!whip) {
+    closing = true;
+    window.bridge.hideOverlay();
+  }
 }
 
 function updateHandleAim() {
@@ -296,9 +415,14 @@ function applyWallCollisions() {
 
 // ── Physics step ────────────────────────────────────────────────────────────
 function update() {
-  if (!whip) return;
+  if (!whip) return { maxMotion: 0, mouseMoved: false };
+
+  crackPulse *= 0.82;
+  if (crackPulse < 0.01) crackPulse = 0;
 
   const g = dropping ? P.dropGravity : P.gravity;
+  const mouseMoved = mouseX !== prevMouseX || mouseY !== prevMouseY;
+  let maxMotion = 0;
   updateHandleAim();
 
   // Verlet integration
@@ -307,6 +431,7 @@ function update() {
     const p = whip[i];
     const vx = (p.x - p.px) * P.damping;
     const vy = (p.y - p.py) * P.damping;
+    maxMotion = Math.max(maxMotion, Math.abs(vx) + Math.abs(vy));
     p.px = p.x;
     p.py = p.y;
     p.x += vx;
@@ -353,19 +478,6 @@ function update() {
     applyWallCollisions();
   }
 
-  // Tip velocity for crack detection
-  const tip = whip[whip.length - 1];
-  const tipVel = Math.hypot(tip.x - tip.px, tip.y - tip.py);
-
-  if (!dropping && tipVel > P.crackSpeed) {
-    const now = Date.now();
-    if (now - whipSpawnTime >= P.firstCrackGraceMs && now - lastCrackTime > P.crackCooldownMs) {
-      lastCrackTime = now;
-      playCrackSound();
-      window.bridge.whipCrack();
-    }
-  }
-
   // If dropping, check if everything fell off screen
   if (dropping && whip.every(p => p.y > H + 60)) {
     whip = null;
@@ -374,15 +486,49 @@ function update() {
   }
   prevMouseX = mouseX;
   prevMouseY = mouseY;
+  return { maxMotion, mouseMoved };
 }
 
 // ── Rendering ───────────────────────────────────────────────────────────────
-function draw() {
-  ctx.clearRect(0, 0, W, H);
+function getWhipBounds() {
+  if (!whip || whip.length === 0) return null;
+  let minX = W;
+  let minY = H;
+  let maxX = 0;
+  let maxY = 0;
+  for (const point of whip) {
+    minX = Math.min(minX, point.x);
+    minY = Math.min(minY, point.y);
+    maxX = Math.max(maxX, point.x);
+    maxY = Math.max(maxY, point.y);
+  }
 
-  // Near-invisible fill so the window captures mouse events on Windows
-  ctx.fillStyle = `rgba(0,0,0,${P.bgAlpha})`;
-  ctx.fillRect(0, 0, W, H);
+  const margin = 48;
+  const x = Math.max(0, Math.floor(minX - margin));
+  const y = Math.max(0, Math.floor(minY - margin));
+  const right = Math.min(W, Math.ceil(maxX + margin));
+  const bottom = Math.min(H, Math.ceil(maxY + margin));
+  return { x, y, width: Math.max(0, right - x), height: Math.max(0, bottom - y) };
+}
+
+function unionBounds(left, right) {
+  if (!left) return right;
+  if (!right) return left;
+  const x = Math.min(left.x, right.x);
+  const y = Math.min(left.y, right.y);
+  const rightEdge = Math.max(left.x + left.width, right.x + right.width);
+  const bottomEdge = Math.max(left.y + left.height, right.y + right.height);
+  return { x, y, width: rightEdge - x, height: bottomEdge - y };
+}
+
+function draw() {
+  const currentDrawBounds = getWhipBounds();
+  const dirtyBounds = unionBounds(previousDrawBounds, currentDrawBounds);
+  if (dirtyBounds && dirtyBounds.width > 0 && dirtyBounds.height > 0) {
+    ctx.clearRect(dirtyBounds.x, dirtyBounds.y, dirtyBounds.width, dirtyBounds.height);
+    fillHitSurface(dirtyBounds.x, dirtyBounds.y, dirtyBounds.width, dirtyBounds.height);
+  }
+  previousDrawBounds = currentDrawBounds;
 
   if (!whip) return;
 
@@ -418,7 +564,7 @@ function draw() {
   for (let i = 0; i < whip.length - 1; i++) {
     const t = i / Math.max(1, whip.length - 2);
     const extra = i < P.handleThickSegments ? P.handleExtraWidth : 0;
-    ctx.lineWidth = lerp(P.lineWidthHandle, P.lineWidthTip, t) + extra;
+    ctx.lineWidth = lerp(P.lineWidthHandle, P.lineWidthTip, t) + extra + crackPulse * t * 2;
     const { cp1x, cp1y, cp2x, cp2y, x2, y2 } = whipSegmentBezier(whip, i);
     ctx.beginPath();
     ctx.moveTo(whip[i].x, whip[i].y);
@@ -428,26 +574,66 @@ function draw() {
 }
 
 // ── Main loop ───────────────────────────────────────────────────────────────
-function loop() {
-  update();
-  draw();
-  requestAnimationFrame(loop);
+let animationFrameId = null;
+let frameTimerId = null;
+let lastFrameAt = 0;
+let idlePhysicsFrames = 0;
+let settleFrames = 0;
+
+function scheduleFrame() {
+  if (animationFrameId !== null || frameTimerId !== null) return;
+  const delay = Math.max(0, TARGET_FRAME_INTERVAL_MS - (performance.now() - lastFrameAt));
+  if (delay > 4) {
+    frameTimerId = setTimeout(() => {
+      frameTimerId = null;
+      animationFrameId = requestAnimationFrame(loop);
+    }, delay);
+    return;
+  }
+  animationFrameId = requestAnimationFrame(loop);
 }
-loop();
+
+function loop(timestamp) {
+  animationFrameId = null;
+  lastFrameAt = timestamp;
+  const state = update();
+  draw();
+
+  const activelyInteracting = dropping || state.mouseMoved || crackPulse > 0;
+  if (activelyInteracting) {
+    idlePhysicsFrames = 0;
+    settleFrames = 0;
+    scheduleFrame();
+    return;
+  }
+
+  idlePhysicsFrames++;
+  if (state.maxMotion > MOTION_EPSILON && idlePhysicsFrames < MAX_IDLE_PHYSICS_FRAMES) {
+    settleFrames = 0;
+    scheduleFrame();
+    return;
+  }
+
+  if (settleFrames < SETTLE_FRAMES) {
+    settleFrames++;
+    scheduleFrame();
+  }
+}
 
 // ── IPC from main process ───────────────────────────────────────────────────
 window.bridge.onSpawnWhip(() => {
-  whip = spawnWhip(mouseX || W / 2, mouseY || H / 2);
-  dropping = false;
-  prevMouseX = mouseX;
-  prevMouseY = mouseY;
-  handleAngle = P.baseTargetAngle;
-  handleAngVel = 0;
+  resetWhipState(mouseX || W / 2, mouseY || H / 2);
 });
 
-window.bridge.onDropWhip(() => {
-  if (whip && !dropping) dropping = true;
+window.bridge.onRefreshWhip(() => {
+  if (!whip && !closing) {
+    resetWhipState(mouseX || W / 2, mouseY || H / 2);
+    return;
+  }
+  if (whip) refreshWhipSurface();
 });
+
+window.bridge.onDropWhip(startDropping);
 
 </script>
 </body>

@@ -1,290 +1,477 @@
-const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen } = require('electron');
-const path = require('path');
-const fs = require('fs');
-const os = require('os');
-const { execFile } = require('child_process');
+const {
+  app,
+  BrowserWindow,
+  Menu,
+  Tray,
+  globalShortcut,
+  ipcMain,
+  nativeImage,
+  screen,
+  shell,
+} = require('electron');
+const fs = require('node:fs');
+const path = require('node:path');
+const {
+  messageForResult,
+  probeCodexDesktop,
+  sendWhipMessage,
+} = require('./lib/codex-desktop-windows');
+const {
+  clearBinding,
+  loadBinding,
+  restoreBinding,
+  saveBinding,
+} = require('./lib/binding-store');
+const {
+  DEFAULT_PHRASES,
+  PhraseLibrary,
+} = require('./lib/phrase-library');
+const { responseForResult } = require('./lib/whip-response');
+const { ensureCodexSteerMode } = require('./lib/codex-config');
 
-// ── Win32 FFI (Windows only) ────────────────────────────────────────────────
-let keybd_event, VkKeyScanA;
-if (process.platform === 'win32') {
-  try {
-    const koffi = require('koffi');
-    const user32 = koffi.load('user32.dll');
-    keybd_event = user32.func('void __stdcall keybd_event(uint8_t bVk, uint8_t bScan, uint32_t dwFlags, uintptr_t dwExtraInfo)');
-    VkKeyScanA = user32.func('int16_t __stdcall VkKeyScanA(int ch)');
-  } catch (e) {
-    console.warn('koffi not available – macro sending disabled', e.message);
-  }
-}
-
-// ── Globals ─────────────────────────────────────────────────────────────────
-let tray, overlay;
+let tray;
+let overlay;
 let overlayReady = false;
 let spawnQueued = false;
+let sendInFlight = false;
+let lastSendAt = 0;
+let revealOverlayOnReady = false;
+let boundSession = null;
+let trayStatus = '未绑定任务';
+let phraseLibrary = null;
+let phraseFilePath = '';
+let bindingFilePath = '';
+let dropHideTimer = null;
+let escapeRegistered = false;
+let steerModeReady = false;
 
-const VK_CONTROL = 0x11;
-const VK_RETURN  = 0x0D;
-const VK_C       = 0x43;
-const VK_MENU    = 0x12; // Alt
-const VK_TAB     = 0x09;
-const KEYUP      = 0x0002;
-
-/** One Alt+Tab / Cmd+Tab so focus returns to the previously active app after tray click. */
-function refocusPreviousApp() {
-  const delayMs = 80;
-  const run = () => {
-    if (process.platform === 'win32') {
-      if (!keybd_event) return;
-      keybd_event(VK_MENU, 0, 0, 0);
-      keybd_event(VK_TAB, 0, 0, 0);
-      keybd_event(VK_TAB, 0, KEYUP, 0);
-      keybd_event(VK_MENU, 0, KEYUP, 0);
-    } else if (process.platform === 'darwin') {
-      const script = [
-        'tell application "System Events"',
-        '  key down command',
-        '  key code 48', // Tab
-        '  key up command',
-        'end tell',
-      ].join('\n');
-      execFile('osascript', ['-e', script], err => {
-        if (err) {
-          console.warn('refocus previous app (Cmd+Tab) failed:', err.message);
-        }
-      });
-    } else if (process.platform === 'linux') {
-      execFile('xdotool', ['key', '--clearmodifiers', 'alt+Tab'], err => {
-        if (err) {
-          console.warn('refocus previous app (Alt+Tab) failed. Install xdotool:', err.message);
-        }
-      });
-    }
-  };
-  setTimeout(run, delayMs);
-}
+const SEND_COOLDOWN_MS = 1500;
+const DROP_HIDE_TIMEOUT_MS = 1800;
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+const STATUS_MESSAGES = Object.freeze({
+  APP_NOT_RUNNING: 'Codex Desktop 未启动',
+  CODEX_MODE_NOT_FOUND: '当前不是 Codex 模式',
+  COMPOSER_NOT_FOUND: '没有找到 Codex 输入框',
+  AMBIGUOUS_WINDOWS: '存在多个 Codex 窗口，无法确定目标',
+  TARGET_WINDOW_NOT_ACTIVE: '已绑定的 Codex 窗口当前未激活',
+  TARGET_SESSION_REQUIRED: '请先绑定 Codex 任务',
+  TARGET_SESSION_MISMATCH: '当前不是已绑定任务，本次未发送',
+  TASK_ID_NOT_FOUND: '无法识别当前 Codex 任务',
+  DRAFT_PRESENT: '目标任务有未发送草稿，本次未发送',
+  ACCESS_DENIED: 'CodexWhip 与 Codex 权限等级不一致',
+  DUPLICATE_TASK_TITLE: '存在同名任务，无法安全恢复绑定',
+  TASK_TITLE_UNVERIFIED: '无法确认任务标题唯一，请重新绑定',
+  QUEUED_MESSAGE_STEER_FAILED: '消息已排队，自动引导失败',
+  STEER_INVOKE_UNAVAILABLE: '消息已排队，但引导按钮暂不可用',
+  CODEX_CONFIG_UPDATE_FAILED: '无法把 Codex 跟进模式设为直接引导',
+  CODEX_CONFIG_CHANGED_DURING_UPDATE: 'Codex 设置正在变化，请再抽一次',
+  CODEX_CONFIG_DUPLICATE_DESKTOP_SECTION: 'Codex 配置存在重复 desktop 段',
+  CODEX_CONFIG_DUPLICATE_FOLLOW_UP_MODE: 'Codex 配置存在重复跟进行为',
+  CODEX_CONFIG_INVALID_FOLLOW_UP_MODE: 'Codex 跟进行为配置无效',
+  CODEX_CONFIG_UPDATE_INVALID: '无法确认 Codex 已启用直接引导',
+});
 
 function createTrayIconFallback() {
-  const p = path.join(__dirname, 'icon', 'Template.png');
-  if (fs.existsSync(p)) {
-    const img = nativeImage.createFromPath(p);
-    if (!img.isEmpty()) {
-      if (process.platform === 'darwin') img.setTemplateImage(true);
-      return img;
-    }
+  const iconPath = path.join(__dirname, 'icon', 'Template.png');
+  if (fs.existsSync(iconPath)) {
+    const image = nativeImage.createFromPath(iconPath);
+    if (!image.isEmpty()) return image;
   }
-  console.warn('openwhip: icon/Template.png missing or invalid');
+  console.warn('codexwhip: icon/Template.png missing or invalid');
   return nativeImage.createEmpty();
 }
 
-async function tryIcnsTrayImage(icnsPath) {
-  const size = { width: 64, height: 64 };
-  const thumb = await nativeImage.createThumbnailFromPath(icnsPath, size);
-  if (!thumb.isEmpty()) return thumb;
-  return null;
-}
-
-// macOS: createFromPath does not decode .icns (Electron only loads PNG/JPEG there, ICO on Windows).
-// Quick Look thumbnails handle .icns; copy to temp if the file is inside ASAR (QL needs a real path).
-async function getTrayIcon() {
-  const iconDir = path.join(__dirname, 'icon');
-  if (process.platform === 'win32') {
-    const file = path.join(iconDir, 'icon.ico');
-    if (fs.existsSync(file)) {
-      const img = nativeImage.createFromPath(file);
-      if (!img.isEmpty()) return img;
-    }
-    return createTrayIconFallback();
-  }
-  if (process.platform === 'darwin') {
-    const file = path.join(iconDir, 'AppIcon.icns');
-    if (fs.existsSync(file)) {
-      const fromPath = nativeImage.createFromPath(file);
-      if (!fromPath.isEmpty()) return fromPath;
-      try {
-        const t = await tryIcnsTrayImage(file);
-        if (t) return t;
-      } catch (e) {
-        console.warn('AppIcon.icns Quick Look thumbnail failed:', e?.message || e);
-      }
-      const tmp = path.join(os.tmpdir(), 'openwhip-tray.icns');
-      try {
-        fs.copyFileSync(file, tmp);
-        const t = await tryIcnsTrayImage(tmp);
-        if (t) return t;
-      } catch (e) {
-        console.warn('AppIcon.icns temp copy + thumbnail failed:', e?.message || e);
-      }
-    }
-    return createTrayIconFallback();
+function getTrayIcon() {
+  const iconPath = path.join(__dirname, 'icon', 'icon.ico');
+  if (fs.existsSync(iconPath)) {
+    const image = nativeImage.createFromPath(iconPath);
+    if (!image.isEmpty()) return image;
   }
   return createTrayIconFallback();
 }
 
-// ── Overlay window ──────────────────────────────────────────────────────────
+function shorten(value, maxLength = 32) {
+  const text = String(value || '');
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength - 1)}…`;
+}
+
+function statusForResult(result) {
+  if (!result) return '未知错误';
+  const base = STATUS_MESSAGES[result.code] || messageForResult(result) || result.code;
+  if (result.code === 'TARGET_SESSION_MISMATCH' && result.currentTaskTitle) {
+    return `${base}：${shorten(result.currentTaskTitle, 20)}`;
+  }
+  return base;
+}
+
+function isOverlayVisible() {
+  return isOverlayUsable() && overlay.isVisible();
+}
+
+function refreshTrayMenu() {
+  if (!tray) return;
+
+  const targetLabel = boundSession
+    ? `已绑定：${shorten(boundSession.taskTitle)}`
+    : '未绑定任务';
+  tray.setToolTip(`CodexWhip - ${targetLabel}`);
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      {
+        label: isOverlayVisible() ? '收起鞭子' : '召唤鞭子',
+        click: toggleOverlay,
+      },
+      { label: '绑定当前 Codex 任务', click: bindCurrentSession },
+      { label: targetLabel, enabled: false },
+      { label: '解除绑定', enabled: Boolean(boundSession), click: clearBoundSession },
+      { type: 'separator' },
+      { label: '测试当前绑定', click: testCodexConnection },
+      { label: steerModeReady ? '跟进模式：直接发送' : '跟进模式：等待修复', enabled: false },
+      { type: 'separator' },
+      { label: '打开中文催促词库', click: openPhraseLibrary },
+      { label: '重新加载词库', click: reloadPhraseLibrary },
+      { label: `状态：${shorten(trayStatus, 42)}`, enabled: false },
+      { type: 'separator' },
+      { label: '退出', click: () => app.quit() },
+    ])
+  );
+}
+
+function setTrayStatus(status) {
+  trayStatus = status;
+  console.log(`codexwhip: status: ${status}`);
+  refreshTrayMenu();
+}
+
+function sessionFromProbe(result) {
+  return {
+    hwnd: result.hwnd,
+    processId: result.processId,
+    taskTitle: result.taskTitle,
+    taskRuntimeId: result.taskRuntimeId,
+  };
+}
+
+async function bindCurrentSession() {
+  const result = await probeCodexDesktop();
+  if (!result.ok) {
+    setTrayStatus(`绑定失败：${statusForResult(result)}`);
+    return;
+  }
+  if (!result.taskTitle || !result.taskRuntimeId) {
+    setTrayStatus('绑定失败：无法识别当前 Codex 任务');
+    return;
+  }
+
+  boundSession = sessionFromProbe(result);
+  const saved = saveBinding(bindingFilePath, result.taskTitle);
+  setTrayStatus(saved.ok
+    ? `已绑定：${result.taskTitle}`
+    : `已绑定，但保存失败：${result.taskTitle}`);
+}
+
+function clearBoundSession() {
+  boundSession = null;
+  const result = clearBinding(bindingFilePath);
+  setTrayStatus(result.ok ? '已解除绑定' : '绑定已解除，但记忆文件删除失败');
+}
+
+async function restoreSavedSession() {
+  const saved = loadBinding(bindingFilePath);
+  if (!saved.ok) {
+    setTrayStatus(saved.code === 'BINDING_NOT_FOUND' ? '未绑定任务' : '绑定记忆无效，请重新绑定');
+    return;
+  }
+
+  const probeResult = await probeCodexDesktop({ targetTaskTitle: saved.taskTitle });
+  const restored = restoreBinding(saved.taskTitle, probeResult);
+  if (!restored.ok) {
+    setTrayStatus(`记忆绑定未恢复：${statusForResult(restored)}`);
+    return;
+  }
+
+  boundSession = restored.binding;
+  setTrayStatus(`已自动恢复：${boundSession.taskTitle}`);
+}
+
+async function testCodexConnection() {
+  if (!boundSession) {
+    setTrayStatus('请先绑定 Codex 任务');
+    return;
+  }
+
+  const result = await probeCodexDesktop({
+    preferredHwnd: boundSession.hwnd,
+    targetTaskTitle: boundSession.taskTitle,
+    targetTaskRuntimeId: boundSession.taskRuntimeId,
+  });
+  if (!result.ok) {
+    setTrayStatus(`连接失败：${statusForResult(result)}`);
+    return;
+  }
+
+  boundSession.hwnd = result.hwnd;
+  boundSession.processId = result.processId;
+  setTrayStatus(result.hasDraft ? '连接正常，但目标任务有草稿' : '连接正常，可以连续抽打');
+}
+
+function initializePhraseLibrary() {
+  phraseLibrary = new PhraseLibrary({ filePath: phraseFilePath });
+  const initialResult = phraseLibrary.load();
+  phraseLibrary.on('updated', result => {
+    if (!tray) return;
+    if (result.ok) {
+      setTrayStatus(`中文词库已加载：${result.phrases.length} 句`);
+    } else {
+      setTrayStatus(`词库无效，继续使用上次版本：${result.message}`);
+    }
+  });
+  phraseLibrary.watch();
+  return initialResult;
+}
+
+async function openPhraseLibrary() {
+  const error = await shell.openPath(phraseFilePath);
+  setTrayStatus(error ? `打开词库失败：${error}` : '已打开中文催促词库');
+}
+
+function reloadPhraseLibrary() {
+  phraseLibrary?.load();
+}
+
 function createOverlay() {
   const { bounds } = screen.getPrimaryDisplay();
   overlay = new BrowserWindow({
-    x: bounds.x, y: bounds.y,
-    width: bounds.width, height: bounds.height,
+    x: bounds.x,
+    y: bounds.y,
+    width: bounds.width,
+    height: bounds.height,
     transparent: true,
+    backgroundColor: '#00000000',
     frame: false,
     alwaysOnTop: true,
     focusable: false,
     skipTaskbar: true,
     resizable: false,
     hasShadow: false,
+    fullscreenable: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
     },
   });
   overlay.setAlwaysOnTop(true, 'screen-saver');
   overlayReady = false;
-  overlay.loadFile('overlay.html');
   overlay.webContents.on('did-finish-load', () => {
     overlayReady = true;
-    if (spawnQueued && overlay && overlay.isVisible()) {
+    if (spawnQueued && isOverlayVisible()) {
       spawnQueued = false;
       overlay.webContents.send('spawn-whip');
-      refocusPreviousApp();
     }
+  });
+  overlay.on('show', refreshTrayMenu);
+  overlay.on('hide', () => {
+    unregisterEscapeShortcut();
+    refreshTrayMenu();
   });
   overlay.on('closed', () => {
     overlay = null;
     overlayReady = false;
     spawnQueued = false;
+    unregisterEscapeShortcut();
   });
+  overlay.loadFile('overlay.html');
+}
+
+function isOverlayUsable() {
+  return Boolean(
+    overlay &&
+    !overlay.isDestroyed() &&
+    overlay.webContents &&
+    !overlay.webContents.isDestroyed()
+  );
+}
+
+function registerEscapeShortcut() {
+  if (escapeRegistered) return;
+  escapeRegistered = globalShortcut.register('Escape', requestOverlayDrop);
+  if (!escapeRegistered) setTrayStatus('鞭子已显示，但 Esc 快捷键注册失败');
+}
+
+function unregisterEscapeShortcut() {
+  if (!escapeRegistered) return;
+  globalShortcut.unregister('Escape');
+  escapeRegistered = false;
+}
+
+function hideOverlay() {
+  clearTimeout(dropHideTimer);
+  dropHideTimer = null;
+  if (isOverlayUsable()) overlay.hide();
+  unregisterEscapeShortcut();
+  refreshTrayMenu();
+}
+
+function requestOverlayDrop() {
+  if (!isOverlayVisible()) return;
+  overlay.webContents.send('drop-whip');
+  clearTimeout(dropHideTimer);
+  dropHideTimer = setTimeout(hideOverlay, DROP_HIDE_TIMEOUT_MS);
 }
 
 function toggleOverlay() {
-  if (overlay && overlay.isVisible()) {
-    overlay.webContents.send('drop-whip');
+  if (isOverlayVisible()) {
+    requestOverlayDrop();
     return;
   }
-  if (!overlay) createOverlay();
+  revealOverlay();
+}
+
+function revealOverlay() {
+  clearTimeout(dropHideTimer);
+  dropHideTimer = null;
+  if (!isOverlayUsable()) createOverlay();
+  if (!isOverlayUsable()) return;
+
   overlay.show();
+  registerEscapeShortcut();
   if (overlayReady) {
     overlay.webContents.send('spawn-whip');
-    refocusPreviousApp();
   } else {
     spawnQueued = true;
   }
+  refreshTrayMenu();
 }
 
-// ── IPC ─────────────────────────────────────────────────────────────────────
-ipcMain.on('whip-crack', () => {
+async function lowerOverlayForDesktopSend() {
+  if (!isOverlayVisible()) return;
+  overlay.setIgnoreMouseEvents(true);
+  overlay.setAlwaysOnTop(false);
+  await new Promise(resolve => setTimeout(resolve, 80));
+}
+
+function restoreOverlayAfterDesktopSend() {
+  if (!isOverlayUsable()) return;
+  overlay.setAlwaysOnTop(true, 'screen-saver');
+  overlay.setIgnoreMouseEvents(false);
+  if (overlay.isVisible()) {
+    overlay.showInactive();
+    setTimeout(() => {
+      if (isOverlayVisible() && overlayReady) {
+        overlay.webContents.send('refresh-whip');
+      }
+    }, 80);
+  }
+}
+
+ipcMain.handle('whip-crack', async () => {
+  const now = Date.now();
+  if (sendInFlight || now - lastSendAt < SEND_COOLDOWN_MS) {
+    return {
+      status: 'cooldown',
+      retryAfterMs: Math.max(0, SEND_COOLDOWN_MS - (now - lastSendAt)),
+    };
+  }
+  if (!boundSession) {
+    await restoreSavedSession();
+  }
+  if (!boundSession) {
+    setTrayStatus('请先绑定 Codex 任务');
+    return { status: 'unbound', code: 'TARGET_SESSION_REQUIRED' };
+  }
+
+  sendInFlight = true;
+  lastSendAt = now;
   try {
-    sendMacro();
-  } catch (err) {
-    console.warn('sendMacro failed:', err?.message || err);
+    const phrase = phraseLibrary?.choose() || DEFAULT_PHRASES[0];
+    const result = await sendWhipMessage({
+      phrase,
+      preferredHwnd: boundSession.hwnd,
+      targetTaskTitle: boundSession.taskTitle,
+      targetTaskRuntimeId: boundSession.taskRuntimeId,
+      beforeDesktopSendFn: lowerOverlayForDesktopSend,
+      afterDesktopSendFn: restoreOverlayAfterDesktopSend,
+    });
+    if (!result.ok) {
+      if (result.code?.startsWith('CODEX_CONFIG_')) steerModeReady = false;
+      setTrayStatus(statusForResult(result));
+      return responseForResult(result);
+    }
+
+    steerModeReady = true;
+    boundSession.hwnd = result.hwnd;
+    boundSession.processId = result.processId;
+    console.log(`codexwhip: sent "${result.phrase}" to Codex Desktop`);
+    setTrayStatus(`已发送：${result.phrase}`);
+    return responseForResult(result);
+  } catch (error) {
+    console.warn('codexwhip: desktop send failed:', error?.message || error);
+    setTrayStatus('发送失败：桌面自动化异常');
+    return { status: 'failed', code: 'DESKTOP_AUTOMATION_FAILED' };
+  } finally {
+    sendInFlight = false;
   }
 });
-ipcMain.on('hide-overlay', () => { if (overlay) overlay.hide(); });
 
-// ── Macro: immediate Ctrl+C, type "Go FASER", Enter ───────────────────────
-function sendMacro() {
-  // Pick a random phrase from a list of similar phrases and type it out
-  const phrases = [
-    'FASTER',
-    'FASTER',
-    'FASTER',
-    'GO FASTER',
-    'Faster CLANKER',
-    'Work FASTER',
-    'Speed it up clanker',
-  ];
-  const chosen = phrases[Math.floor(Math.random() * phrases.length)];
+ipcMain.on('hide-overlay', hideOverlay);
 
-  if (process.platform === 'win32') {
-    sendMacroWindows(chosen);
-  } else if (process.platform === 'darwin') {
-    sendMacroMac(chosen);
-  } else if (process.platform === 'linux') {
-    sendMacroLinux(chosen);
-  }
-}
-
-function sendMacroWindows(text) {
-  if (!keybd_event || !VkKeyScanA) return;
-  const tapKey = vk => {
-    keybd_event(vk, 0, 0, 0);
-    keybd_event(vk, 0, KEYUP, 0);
-  };
-  const tapChar = ch => {
-    const packed = VkKeyScanA(ch.charCodeAt(0));
-    if (packed === -1) return;
-    const vk = packed & 0xff;
-    const shiftState = (packed >> 8) & 0xff;
-    if (shiftState & 1) keybd_event(0x10, 0, 0, 0); // Shift down
-    tapKey(vk);
-    if (shiftState & 1) keybd_event(0x10, 0, KEYUP, 0); // Shift up
-  };
-
-  // Ctrl+C (interrupt)
-  keybd_event(VK_CONTROL, 0, 0, 0);
-  keybd_event(VK_C, 0, 0, 0);
-  keybd_event(VK_C, 0, KEYUP, 0);
-  keybd_event(VK_CONTROL, 0, KEYUP, 0);
-  for (const ch of text) tapChar(ch);
-  keybd_event(VK_RETURN, 0, 0, 0);
-  keybd_event(VK_RETURN, 0, KEYUP, 0);
-}
-
-function sendMacroMac(text) {
-  const escaped = text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-  const interruptScript = [
-    'tell application "System Events"',
-    '  key code 8 using {control down}', // Ctrl+C interrupt
-    'end tell'
-  ].join('\n');
-  const typeAndEnterScript = [
-    'tell application "System Events"',
-    `  keystroke "${escaped}"`,
-    '  key code 36', // Enter
-    'end tell'
-  ].join('\n');
-
-  execFile('osascript', ['-e', interruptScript], err => {
-    if (err) {
-      console.warn('mac macro failed (enable Accessibility for terminal/app):', err.message);
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (!app.isReady() || !tray) {
+      revealOverlayOnReady = true;
       return;
     }
 
     setTimeout(() => {
-      execFile('osascript', ['-e', typeAndEnterScript], err2 => {
-        if (err2) {
-          console.warn('mac macro failed (enable Accessibility for terminal/app):', err2.message);
-        }
-      });
-    }, 300);
+      try {
+        revealOverlay();
+      } catch (error) {
+        console.warn('codexwhip: could not reveal existing instance:', error?.message || error);
+      }
+    }, 100);
+  });
+
+  app.whenReady().then(async () => {
+    if (process.platform !== 'win32') {
+      console.warn('codexwhip: CodexWhip Desktop currently supports Windows only.');
+      app.quit();
+      return;
+    }
+
+    app.setAppUserModelId('com.weiling.codexwhip');
+    const steerModeResult = ensureCodexSteerMode();
+    steerModeReady = steerModeResult.ok;
+    const storageDir = path.join(app.getPath('appData'), 'codexwhip');
+    phraseFilePath = path.join(storageDir, 'phrases.json');
+    bindingFilePath = path.join(storageDir, 'binding.json');
+    const phraseResult = initializePhraseLibrary();
+
+    tray = new Tray(getTrayIcon());
+    refreshTrayMenu();
+    tray.on('click', toggleOverlay);
+
+    await restoreSavedSession();
+    if (!steerModeResult.ok) {
+      setTrayStatus(`直接发送未启用：${statusForResult(steerModeResult)}`);
+    }
+    if (!phraseResult.ok) {
+      setTrayStatus(`词库无效，继续使用默认中文词库：${phraseResult.message}`);
+    }
+
+    revealOverlay();
+    if (revealOverlayOnReady) {
+      revealOverlayOnReady = false;
+      revealOverlay();
+    }
   });
 }
 
-function sendMacroLinux(text) {
-  execFile(
-    'xdotool',
-    [
-      'key', '--clearmodifiers', 'ctrl+c',
-      'type', '--delay', '1', '--clearmodifiers', '--', text,
-      'key', 'Return',
-    ],
-    err => {
-      if (err) {
-        console.warn('linux macro failed. Install xdotool:', err.message);
-      }
-    }
-  );
-}
-
-// ── App lifecycle ───────────────────────────────────────────────────────────
-app.whenReady().then(async () => {
-  tray = new Tray(await getTrayIcon());
-  tray.setToolTip('OpenWhip - click for whip');
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      { label: 'Quit', click: () => app.quit() },
-    ])
-  );
-  tray.on('click', toggleOverlay);
+app.on('will-quit', () => {
+  clearTimeout(dropHideTimer);
+  phraseLibrary?.close();
+  globalShortcut.unregisterAll();
 });
 
-app.on('window-all-closed', e => e.preventDefault()); // keep alive in tray
+app.on('window-all-closed', event => event.preventDefault());
