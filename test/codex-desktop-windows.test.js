@@ -7,10 +7,8 @@ const {
   PHRASES,
   choosePhrase,
   encodeHelperText,
-  ensureSteerDelivery,
   messageForResult,
   parseHelperOutput,
-  pressEnter,
   sendWhipMessage,
 } = require('../lib/codex-desktop-windows');
 const { isChinesePhrase } = require('../lib/phrase-library');
@@ -46,48 +44,6 @@ test('choosePhrase maps the random range to the Chinese phrase list', () => {
   assert.ok(PHRASES.some(phrase => /废物|垃圾|饭桶|无能/u.test(phrase)));
 });
 
-test('ensureSteerDelivery accepts a direct Steer delivery', async () => {
-  const result = await ensureSteerDelivery({
-    runHelperFn: async () => ({ ok: true, code: 'ALREADY_STEERED' }),
-  });
-  assert.equal(result.code, 'ALREADY_STEERED');
-});
-
-test('ensureSteerDelivery retries until the queued message is steered', async () => {
-  let clock = 0;
-  let attempts = 0;
-  const result = await ensureSteerDelivery({
-    dispatchTimeoutMs: 500,
-    dispatchPollMs: 100,
-    nowFn: () => clock,
-    delayFn: async milliseconds => { clock += milliseconds; },
-    runHelperFn: async () => {
-      attempts++;
-      return attempts === 1
-        ? { ok: false, code: 'STEER_PENDING' }
-        : { ok: true, code: 'QUEUED_MESSAGE_STEERED' };
-    },
-  });
-  assert.equal(attempts, 2);
-  assert.equal(result.code, 'QUEUED_MESSAGE_STEERED');
-});
-
-test('ensureSteerDelivery reports an automatic Steer timeout', async () => {
-  let clock = 0;
-  const result = await ensureSteerDelivery({
-    dispatchTimeoutMs: 200,
-    dispatchPollMs: 100,
-    nowFn: () => clock,
-    delayFn: async milliseconds => { clock += milliseconds; },
-    runHelperFn: async () => ({ ok: false, code: 'STEER_PENDING' }),
-  });
-  assert.deepEqual(result, {
-    ok: false,
-    code: 'QUEUED_MESSAGE_STEER_FAILED',
-    detail: 'STEER_PENDING',
-  });
-});
-
 test('send is refused before desktop automation when Steer cannot be confirmed', async () => {
   const result = await sendWhipMessage({
     targetTaskTitle: '测试任务',
@@ -98,29 +54,7 @@ test('send is refused before desktop automation when Steer cannot be confirmed',
   assert.deepEqual(result, { ok: false, code: 'CODEX_CONFIG_UPDATE_FAILED' });
 });
 
-test('pressEnter sends one Return key down and key up pair', async () => {
-  const calls = [];
-  const result = await pressEnter({
-    keyboardApi: {
-      inputSize: 40,
-      sendInput(count, events, inputSize) {
-        calls.push({ count, events, inputSize });
-        return count;
-      },
-    },
-  });
-
-  assert.deepEqual(result, { ok: true, code: 'ENTER_PRESSED' });
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].count, 2);
-  assert.equal(calls[0].inputSize, 40);
-  assert.equal(calls[0].events[0].u.ki.wVk, 0x0d);
-  assert.equal(calls[0].events[0].u.ki.dwFlags, 0);
-  assert.equal(calls[0].events[1].u.ki.wVk, 0x0d);
-  assert.equal(calls[0].events[1].u.ki.dwFlags, 0x0002);
-});
-
-test('send writes and commits during the guarded lower window', async () => {
+test('send stays inside one guarded helper transaction', async () => {
   const calls = [];
   const result = await sendWhipMessage({
     phrase: '测试催促',
@@ -132,29 +66,26 @@ test('send writes and commits during the guarded lower window', async () => {
     afterDesktopSendFn: async () => { calls.push('overlay:restore'); },
     runHelperFn: async mode => {
       calls.push(`helper:${mode}`);
-      if (mode === 'write') {
-        return {
-          ok: true,
-          code: 'WRITE_READY',
-          hwnd: 123,
-          processId: 456,
-          inputMethod: 'ValuePattern',
-          draftVerification: 'ExactText',
-        };
-      }
-      if (mode === 'commit') return { ok: true, code: 'SUBMIT_INVOKED', hwnd: 123, processId: 456 };
-      return { ok: true, code: 'ALREADY_STEERED', hwnd: 123, processId: 456 };
+      return {
+        ok: true,
+        code: 'MESSAGE_DELIVERED',
+        hwnd: 123,
+        processId: 456,
+        inputMethod: 'ValuePattern',
+        draftVerification: 'ExactText',
+        messageRuntimeId: '42.message',
+      };
     },
   });
 
   assert.equal(result.code, 'SENT');
+  assert.equal(result.delivery, 'MESSAGE_DELIVERED');
+  assert.equal(result.messageRuntimeId, '42.message');
   assert.equal(result.inputMethod, 'ValuePattern');
   assert.deepEqual(calls, [
     'overlay:lower',
-    'helper:write',
-    'helper:commit',
+    'helper:send',
     'overlay:restore',
-    'helper:steer',
   ]);
 });
 
@@ -177,7 +108,7 @@ test('send stops before delivery checks when the atomic helper rejects the targe
   assert.equal(result.code, 'TARGET_SESSION_MISMATCH');
   assert.deepEqual(calls, [
     'overlay:lower',
-    'helper:write',
+    'helper:send',
     'overlay:restore',
   ]);
 });
@@ -186,6 +117,8 @@ test('messageForResult and IPC responses keep failures actionable', () => {
   assert.match(messageForResult({ ok: false, code: 'DRAFT_PRESENT' }), /unsent draft/i);
   assert.match(messageForResult({ ok: false, code: 'TARGET_SESSION_MISMATCH' }), /bound task/i);
   assert.match(messageForResult({ ok: false, code: 'QUEUED_MESSAGE_STEER_FAILED' }), /convert it to Steer/i);
+  assert.match(messageForResult({ ok: false, code: 'DELIVERY_AMBIGUOUS' }), /Nothing was guessed/i);
+  assert.match(messageForResult({ ok: false, code: 'DELIVERY_UNCONFIRMED' }), /prove/i);
   assert.match(messageForResult({ ok: false, code: 'CODEX_CONFIG_UPDATE_FAILED' }), /follow-up behavior to Steer/i);
   assert.deepEqual(responseForResult({ ok: false, code: 'DRAFT_PRESENT' }), {
     status: 'draft',
@@ -245,7 +178,7 @@ test('overlay stays visible after left click and supports three close controls',
   assert.doesNotMatch(main, /\bNotification\b|showDesktopNotification/u);
 });
 
-test('PowerShell helper uses task identity, multilingual Steer and structural matching', () => {
+test('PowerShell helper verifies the exact target and proves delivery with new runtime ids', () => {
   const helper = fs.readFileSync(
     path.join(__dirname, '..', 'scripts', 'codex-desktop-ui.ps1'),
     'utf8'
@@ -253,44 +186,49 @@ test('PowerShell helper uses task identity, multilingual Steer and structural ma
 
   assert.match(helper, /sidebar-item/u);
   assert.match(helper, /TaskTitleMatchCount/u);
-  assert.match(helper, /Test-SameCompactContainer/u);
   assert.match(helper, /Test-ContainsAutomationElement/u);
   assert.match(helper, /AttachThreadInput/u);
   assert.match(helper, /BringWindowToTop/u);
   assert.match(helper, /AddMilliseconds\(1200\)/u);
-  assert.match(helper, /\.Current\.Name\.Trim\(\) -eq \$ExpectedText\.Trim\(\)/u);
   assert.match(helper, /\\bsteer\\b/u);
   assert.match(helper, /\$name -match '引导'/u);
-  assert.match(helper, /STEER_PENDING/u);
   assert.match(helper, /Work with ChatGPT/u);
   assert.match(helper, /TargetTaskTitleBase64/u);
   assert.match(helper, /\$Mode -eq 'probe' -or \$hasTargetIdentity/u);
   assert.match(helper, /\$PreferredHwnd -gt 0/u);
-  assert.match(helper, /SUBMIT_READY/u);
   assert.match(helper, /\$Mode -eq 'send'/u);
-  assert.match(helper, /\$Mode -eq 'write'/u);
-  assert.match(helper, /\$Mode -eq 'commit'/u);
-  assert.match(helper, /WRITE_READY/u);
-  assert.match(helper, /SendUnicodeText/u);
-  assert.match(helper, /PressEnter/u);
+  assert.doesNotMatch(helper, /\$Mode -eq 'write'/u);
+  assert.doesNotMatch(helper, /\$Mode -eq 'commit'/u);
+  assert.doesNotMatch(helper, /\$Mode -eq 'steer'/u);
+  assert.match(helper, /SendUnicodeTextToWindow/u);
+  assert.match(helper, /PressEnterToWindow/u);
+  assert.match(helper, /GetForegroundWindow\(\) != expectedForeground/u);
+  assert.match(helper, /Get-VerifiedCodexTarget/u);
+  assert.match(helper, /Set-And-VerifyComposerFocus/u);
+  assert.match(helper, /-RequireForeground/u);
+  assert.match(helper, /-RequireFocus/u);
+  assert.match(helper, /Get-RuntimeIdLookup/u);
+  assert.match(helper, /Get-NewExactTextElements/u);
+  assert.match(helper, /Test-IsSubmittedUserMessage/u);
+  assert.match(helper, /Get-SteerActionsForText/u);
+  assert.match(helper, /DELIVERY_AMBIGUOUS/u);
+  assert.match(helper, /DELIVERY_UNCONFIRMED/u);
+  assert.match(helper, /STEER_DELIVERY_UNCONFIRMED/u);
+  assert.match(helper, /MESSAGE_DELIVERED/u);
+  assert.doesNotMatch(helper, /ALREADY_STEERED/u);
   assert.match(helper, /\$valuePattern\.Current\.Value/u);
   assert.match(helper, /\$normalizedValue = \$currentValue\.Trim\(\)/u);
   assert.match(helper, /Test-ComposerPlaceholder -Name \$normalizedValue/u);
-  assert.match(helper, /SUBMIT_INVOKED/u);
   assert.match(helper, /inputMethod/u);
-  assert.match(helper, /ValuePatternPending/u);
   assert.match(helper, /draftVerification/u);
   assert.doesNotMatch(helper, /\$submitButton/u);
   assert.doesNotMatch(helper, /SUBMIT_BUTTON_NOT_FOUND/u);
-  assert.match(helper, /Never invoke the nearby Stop\/停止 button/u);
 
-  const writeBlock = helper.match(
-    /if \(\$Mode -eq 'write'\) \{([\s\S]*?)\n  \}\n\n  if \(\$Mode -eq 'commit'\)/u
+  const sendBlock = helper.match(
+    /if \(\$Mode -eq 'send'\) \{([\s\S]*?)\r?\n  \}\r?\n\r?\n  if \(\$selected\.HasDraft\)/u
   )?.[1];
-  assert.ok(writeBlock);
-  const foregroundIndex = writeBlock.indexOf('Set-CodexForeground -Hwnd $selected.Hwnd');
-  const focusIndex = writeBlock.indexOf('$selected.Composer.SetFocus()');
-  const valuePatternIndex = writeBlock.indexOf('$selected.Composer.TryGetCurrentPattern');
-  assert.ok(foregroundIndex >= 0 && foregroundIndex < valuePatternIndex);
-  assert.ok(focusIndex >= 0 && focusIndex < valuePatternIndex);
+  assert.ok(sendBlock);
+  const enterIndex = sendBlock.indexOf('PressEnterToWindow');
+  const finalVerifyIndex = sendBlock.lastIndexOf('Get-VerifiedCodexTarget', enterIndex);
+  assert.ok(finalVerifyIndex >= 0 && finalVerifyIndex < enterIndex);
 });

@@ -59,3 +59,24 @@ test('duplicate or inactive titles never restore automatically', () => {
     taskRuntimeId: '42.runtime',
   }).code, 'TARGET_SESSION_MISMATCH');
 });
+
+test('failed atomic replacement preserves the last valid binding', t => {
+  const filePath = makeBindingPath(t);
+  assert.equal(saveBinding(filePath, '原任务').ok, true);
+
+  const originalRename = fs.renameSync;
+  fs.renameSync = function patchedRename(source, destination) {
+    if (String(destination) === filePath) throw new Error('simulated rename failure');
+    return originalRename.call(this, source, destination);
+  };
+  t.after(() => { fs.renameSync = originalRename; });
+
+  const result = saveBinding(filePath, '新任务');
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'BINDING_SAVE_FAILED');
+  assert.deepEqual(loadBinding(filePath), {
+    ok: true,
+    code: 'BINDING_LOADED',
+    taskTitle: '原任务',
+  });
+});

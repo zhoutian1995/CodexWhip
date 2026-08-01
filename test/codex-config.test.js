@@ -8,7 +8,6 @@ const {
   ensureCodexSteerMode,
   followUpModeFromText,
   resolveCodexConfigPath,
-  setFollowUpModeInText,
 } = require('../lib/codex-config');
 
 function makeConfigPath(t) {
@@ -17,78 +16,64 @@ function makeConfigPath(t) {
   return path.join(directory, '.codex', 'config.toml');
 }
 
-test('existing Queue setting is replaced with Steer without rewriting other settings', () => {
-  const source = [
-    'model = "gpt-test"',
-    '',
-    '[desktop]',
-    'followUpQueueMode = "queue"',
-    'appearanceTheme = "dark"',
-    '',
-    '[projects.test]',
-    'trust_level = "trusted"',
-    '',
-  ].join('\r\n');
-  const result = setFollowUpModeInText(source);
-
-  assert.equal(result.ok, true);
-  assert.equal(result.changed, true);
-  assert.match(result.content, /followUpQueueMode = "steer"\r\n/u);
-  assert.match(result.content, /appearanceTheme = "dark"/u);
-  assert.match(result.content, /\[projects\.test\]/u);
-  assert.doesNotMatch(result.content, /followUpQueueMode = "queue"/u);
+test('structured TOML reading accepts bare, quoted, dotted and inline Steer settings', () => {
+  assert.equal(followUpModeFromText('[desktop]\nfollowUpQueueMode = "steer"\n').mode, 'steer');
+  assert.equal(followUpModeFromText('[desktop]\n"followUpQueueMode" = "steer"\n').mode, 'steer');
+  assert.equal(followUpModeFromText('desktop.followUpQueueMode = "steer"\n').mode, 'steer');
+  assert.equal(followUpModeFromText('desktop = { followUpQueueMode = "steer" }\n').mode, 'steer');
 });
 
-test('missing desktop setting or section is added explicitly', () => {
-  const insideSection = setFollowUpModeInText('[desktop]\nappearanceTheme = "dark"\n');
-  assert.match(insideSection.content, /\[desktop\]\nfollowUpQueueMode = "steer"\n/u);
-
-  const missingSection = setFollowUpModeInText('model = "gpt-test"\n');
-  assert.match(
-    missingSection.content,
-    /model = "gpt-test"\n\n\[desktop\]\nfollowUpQueueMode = "steer"\n$/u
-  );
+test('missing, Queue and legacy interrupt modes are reported without rewriting', () => {
+  assert.equal(followUpModeFromText('model = "gpt-test"\n').mode, null);
+  assert.equal(followUpModeFromText('[desktop]\nfollowUpQueueMode = "queue"\n').mode, 'queue');
+  assert.equal(followUpModeFromText('[desktop]\nfollowUpQueueMode = "interrupt"\n').mode, 'interrupt');
 });
 
-test('already enabled Steer is a no-op and legacy interrupt is normalized', () => {
-  const ready = setFollowUpModeInText('[desktop]\nfollowUpQueueMode = "steer"\n');
-  assert.equal(ready.changed, false);
-  assert.equal(followUpModeFromText(ready.content).mode, 'steer');
-
-  const legacy = setFollowUpModeInText('[desktop]\nfollowUpQueueMode = "interrupt"\n');
-  assert.equal(legacy.changed, true);
-  assert.equal(followUpModeFromText(legacy.content).mode, 'steer');
-});
-
-test('duplicate desktop settings are rejected instead of guessing', () => {
-  assert.equal(setFollowUpModeInText([
+test('duplicate settings and invalid TOML are rejected instead of guessed', () => {
+  assert.equal(followUpModeFromText([
     '[desktop]',
     'followUpQueueMode = "queue"',
     'followUpQueueMode = "steer"',
   ].join('\n')).code, 'CODEX_CONFIG_DUPLICATE_FOLLOW_UP_MODE');
 
-  assert.equal(setFollowUpModeInText([
+  assert.equal(followUpModeFromText([
     '[desktop]',
     'followUpQueueMode = "queue"',
     '[desktop]',
     'followUpQueueMode = "steer"',
   ].join('\n')).code, 'CODEX_CONFIG_DUPLICATE_DESKTOP_SECTION');
+
+  assert.equal(
+    followUpModeFromText('[desktop\nfollowUpQueueMode = "queue"\n').code,
+    'CODEX_CONFIG_INVALID_TOML'
+  );
 });
 
-test('ensureCodexSteerMode creates and atomically updates config.toml', t => {
+test('ensureCodexSteerMode is read-only and requires the official Steer setting', t => {
   const filePath = makeConfigPath(t);
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, '[desktop]\nfollowUpQueueMode = "queue"\n', 'utf8');
+  const queueSource = '[desktop]\n"followUpQueueMode" = "queue"\n';
+  fs.writeFileSync(filePath, queueSource, 'utf8');
 
-  const updated = ensureCodexSteerMode({ filePath });
-  assert.equal(updated.ok, true);
-  assert.equal(updated.code, 'STEER_MODE_ENABLED');
-  assert.equal(updated.changed, true);
-  assert.equal(followUpModeFromText(fs.readFileSync(filePath, 'utf8')).mode, 'steer');
+  const required = ensureCodexSteerMode({ filePath });
+  assert.equal(required.ok, false);
+  assert.equal(required.code, 'CODEX_STEER_MODE_REQUIRED');
+  assert.equal(fs.readFileSync(filePath, 'utf8'), queueSource);
 
+  const steerSource = '[desktop]\n"followUpQueueMode" = "steer"\n';
+  fs.writeFileSync(filePath, steerSource, 'utf8');
   const ready = ensureCodexSteerMode({ filePath });
+  assert.equal(ready.ok, true);
   assert.equal(ready.code, 'STEER_MODE_READY');
   assert.equal(ready.changed, false);
+  assert.equal(fs.readFileSync(filePath, 'utf8'), steerSource);
+});
+
+test('missing config requires Steer without creating a file', t => {
+  const filePath = makeConfigPath(t);
+  const result = ensureCodexSteerMode({ filePath });
+  assert.equal(result.code, 'CODEX_STEER_MODE_REQUIRED');
+  assert.equal(fs.existsSync(filePath), false);
 });
 
 test('config path respects CODEX_HOME', () => {

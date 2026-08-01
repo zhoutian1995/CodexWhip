@@ -1,5 +1,5 @@
 param(
-  [ValidateSet('probe', 'focus', 'write', 'commit', 'send', 'submit', 'steer')]
+  [ValidateSet('probe', 'focus', 'send')]
   [string]$Mode = 'probe',
 
   [long]$PreferredHwnd = 0,
@@ -157,7 +157,8 @@ namespace CodexWhip {
       return input;
     }
 
-    public static bool SendUnicodeText(string text) {
+    public static bool SendUnicodeTextToWindow(IntPtr expectedForeground, string text) {
+      if (GetForegroundWindow() != expectedForeground) return false;
       var inputs = new List<INPUT>();
       foreach (char codeUnit in text) {
         inputs.Add(KeyboardInput(0, codeUnit, KEYEVENTF_UNICODE));
@@ -167,7 +168,8 @@ namespace CodexWhip {
       return SendInput((uint)inputs.Count, inputs.ToArray(), Marshal.SizeOf(typeof(INPUT))) == inputs.Count;
     }
 
-    public static bool PressEnter() {
+    public static bool PressEnterToWindow(IntPtr expectedForeground) {
+      if (GetForegroundWindow() != expectedForeground) return false;
       var inputs = new[] {
         KeyboardInput(0x0D, 0, 0),
         KeyboardInput(0x0D, 0, KEYEVENTF_KEYUP)
@@ -282,6 +284,8 @@ namespace CodexWhip {
         )
       }
     }
+
+    return ([long][CodexWhip.NativeMethods]::GetForegroundWindow() -eq $Hwnd)
   }
 
   function Get-ComposerDraftText {
@@ -415,6 +419,224 @@ namespace CodexWhip {
     }
 
     return (($Element.GetRuntimeId() | ForEach-Object { [string]$_ }) -join '.')
+  }
+
+  function Get-VerifiedCodexTarget {
+    param(
+      [long]$Hwnd,
+      [string]$ExpectedComposerRuntimeId = '',
+      [switch]$RequireForeground,
+      [switch]$RequireFocus
+    )
+
+    if (
+      $RequireForeground -and
+      [long][CodexWhip.NativeMethods]::GetForegroundWindow() -ne $Hwnd
+    ) {
+      Write-CodexWhipResult $false 'TARGET_WINDOW_NOT_ACTIVE' @{ hwnd = $Hwnd }
+    }
+
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$Hwnd)
+    $documentCondition = New-Object System.Windows.Automation.PropertyCondition(
+      [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+      [System.Windows.Automation.ControlType]::Document
+    )
+    $document = $root.FindFirst(
+      [System.Windows.Automation.TreeScope]::Descendants,
+      $documentCondition
+    )
+    if ($null -eq $document -or $document.Current.Name -ne 'Codex') {
+      Write-CodexWhipResult $false 'CODEX_MODE_NOT_FOUND' @{ hwnd = $Hwnd }
+    }
+
+    $taskIdentity = Find-CodexTaskIdentity -Root $root
+    if ($null -eq $taskIdentity) {
+      Write-CodexWhipResult $false 'TASK_ID_NOT_FOUND' @{ hwnd = $Hwnd }
+    }
+    if (
+      (-not [string]::IsNullOrWhiteSpace($TargetTaskTitle) -and
+        $taskIdentity.Title -ne $TargetTaskTitle) -or
+      (-not [string]::IsNullOrWhiteSpace($TargetTaskRuntimeId) -and
+        $taskIdentity.RuntimeId -ne $TargetTaskRuntimeId)
+    ) {
+      Write-CodexWhipResult $false 'TARGET_SESSION_MISMATCH' @{
+        hwnd = $Hwnd
+        currentTaskTitle = $taskIdentity.Title
+        targetTaskTitle = $TargetTaskTitle
+      }
+    }
+
+    $composer = Find-CodexComposer -Root $document
+    if ($null -eq $composer) {
+      Write-CodexWhipResult $false 'COMPOSER_NOT_FOUND' @{ hwnd = $Hwnd }
+    }
+    $composerRuntimeId = Get-AutomationRuntimeId -Element $composer
+    if (
+      -not [string]::IsNullOrWhiteSpace($ExpectedComposerRuntimeId) -and
+      $composerRuntimeId -ne $ExpectedComposerRuntimeId
+    ) {
+      Write-CodexWhipResult $false 'COMPOSER_CHANGED' @{ hwnd = $Hwnd }
+    }
+
+    if ($RequireFocus) {
+      $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+      if (-not (Test-ContainsAutomationElement -Ancestor $composer -Element $focused)) {
+        Write-CodexWhipResult $false 'FOCUS_FAILED' @{ hwnd = $Hwnd }
+      }
+    }
+
+    return [pscustomobject]@{
+      Root = $root
+      Document = $document
+      Composer = $composer
+      ComposerRuntimeId = $composerRuntimeId
+      TaskIdentity = $taskIdentity
+    }
+  }
+
+  function Set-And-VerifyComposerFocus {
+    param(
+      [long]$Hwnd,
+      [string]$ExpectedComposerRuntimeId
+    )
+
+    if (-not (Set-CodexForeground -Hwnd $Hwnd)) {
+      Write-CodexWhipResult $false 'TARGET_WINDOW_NOT_ACTIVE' @{ hwnd = $Hwnd }
+    }
+    $target = Get-VerifiedCodexTarget `
+      -Hwnd $Hwnd `
+      -ExpectedComposerRuntimeId $ExpectedComposerRuntimeId `
+      -RequireForeground
+    $target.Composer.SetFocus()
+    Start-Sleep -Milliseconds 50
+    return Get-VerifiedCodexTarget `
+      -Hwnd $Hwnd `
+      -ExpectedComposerRuntimeId $ExpectedComposerRuntimeId `
+      -RequireForeground `
+      -RequireFocus
+  }
+
+  function Get-ExactTextElements {
+    param(
+      [System.Windows.Automation.AutomationElement]$Document,
+      [string]$Text
+    )
+
+    $textCondition = New-Object System.Windows.Automation.PropertyCondition(
+      [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+      [System.Windows.Automation.ControlType]::Text
+    )
+    $elements = $Document.FindAll(
+      [System.Windows.Automation.TreeScope]::Descendants,
+      $textCondition
+    )
+    $matches = @()
+    for ($index = 0; $index -lt $elements.Count; $index++) {
+      $element = $elements.Item($index)
+      if ($element.Current.Name.Trim() -eq $Text.Trim()) {
+        $matches += $element
+      }
+    }
+    return @($matches)
+  }
+
+  function Get-RuntimeIdLookup {
+    param([object[]]$Elements)
+
+    $lookup = @{}
+    foreach ($element in $Elements) {
+      $lookup[(Get-AutomationRuntimeId -Element $element)] = $true
+    }
+    return $lookup
+  }
+
+  function Get-NewExactTextElements {
+    param(
+      [System.Windows.Automation.AutomationElement]$Document,
+      [string]$Text,
+      [hashtable]$BeforeRuntimeIds
+    )
+
+    $newElements = @()
+    foreach ($element in @(Get-ExactTextElements -Document $Document -Text $Text)) {
+      $runtimeId = Get-AutomationRuntimeId -Element $element
+      if (-not $BeforeRuntimeIds.ContainsKey($runtimeId)) {
+        $newElements += $element
+      }
+    }
+    return @($newElements)
+  }
+
+  function Test-IsSubmittedUserMessage {
+    param([System.Windows.Automation.AutomationElement]$TextElement)
+
+    $walker = [System.Windows.Automation.TreeWalker]::RawViewWalker
+    $current = $TextElement
+    $insideThread = $false
+    $insideUserBubble = $false
+    for ($depth = 0; $depth -lt 16 -and $null -ne $current; $depth++) {
+      $className = $current.Current.ClassName
+      if ($className -like '*thread-scroll-container*') {
+        $insideThread = $true
+      }
+      if ($className -like '*bg-token-foreground/5*') {
+        $insideUserBubble = $true
+      }
+      $current = $walker.GetParent($current)
+    }
+    return ($insideThread -and $insideUserBubble)
+  }
+
+  function Get-SteerActionsForText {
+    param([System.Windows.Automation.AutomationElement]$TextElement)
+
+    $buttonCondition = New-Object System.Windows.Automation.PropertyCondition(
+      [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+      [System.Windows.Automation.ControlType]::Button
+    )
+    $walker = [System.Windows.Automation.TreeWalker]::RawViewWalker
+    $container = $walker.GetParent($TextElement)
+
+    for ($depth = 0; $depth -lt 10 -and $null -ne $container; $depth++) {
+      $bounds = $container.Current.BoundingRectangle
+      if ($bounds.Width -gt 0 -and $bounds.Height -gt 0 -and $bounds.Height -le 300) {
+        $buttons = $container.FindAll(
+          [System.Windows.Automation.TreeScope]::Descendants,
+          $buttonCondition
+        )
+        $actions = @()
+        $seen = @{}
+        for ($index = 0; $index -lt $buttons.Count; $index++) {
+          $button = $buttons.Item($index)
+          if (
+            $button.Current.IsOffscreen -or
+            -not $button.Current.IsEnabled -or
+            -not (Test-SteerAction -Button $button)
+          ) {
+            continue
+          }
+          $runtimeId = Get-AutomationRuntimeId -Element $button
+          if ($seen.ContainsKey($runtimeId)) { continue }
+          $invokePattern = $null
+          if ($button.TryGetCurrentPattern(
+            [System.Windows.Automation.InvokePattern]::Pattern,
+            [ref]$invokePattern
+          )) {
+            $seen[$runtimeId] = $true
+            $actions += [pscustomobject]@{
+              RuntimeId = $runtimeId
+              InvokePattern = $invokePattern
+            }
+          }
+        }
+        if ($actions.Count -gt 0) {
+          return @($actions)
+        }
+      }
+      $container = $walker.GetParent($container)
+    }
+
+    return @()
   }
 
   function Test-SameCompactContainer {
@@ -699,145 +921,6 @@ namespace CodexWhip {
     }
   }
 
-  if ($Mode -eq 'write') {
-    if ($selected.HasDraft) {
-      Write-CodexWhipResult $false 'DRAFT_PRESENT' @{
-        hwnd = $selected.Hwnd
-        processId = $selected.ProcessId
-      }
-    }
-    if ([string]::IsNullOrWhiteSpace($ExpectedText)) {
-      Write-CodexWhipResult $false 'SUBMIT_TEXT_NOT_FOUND'
-    }
-
-    Set-CodexForeground -Hwnd $selected.Hwnd
-    $selected.Composer.SetFocus()
-    Start-Sleep -Milliseconds 50
-
-    $valuePattern = $null
-    $valuePatternUsed = $false
-    if ($selected.Composer.TryGetCurrentPattern(
-      [System.Windows.Automation.ValuePattern]::Pattern,
-      [ref]$valuePattern
-    )) {
-      try {
-        $valuePattern.SetValue($ExpectedText)
-        $valuePatternUsed = $true
-      } catch {
-        $valuePatternUsed = $false
-      }
-    }
-
-    if (-not $valuePatternUsed) {
-      Set-CodexForeground -Hwnd $selected.Hwnd
-      $selected.Composer.SetFocus()
-      Start-Sleep -Milliseconds 50
-      if (-not [CodexWhip.NativeMethods]::SendUnicodeText($ExpectedText)) {
-        Write-CodexWhipResult $false 'KEYBOARD_UNAVAILABLE'
-      }
-    }
-
-    $draftDeadline = [DateTime]::UtcNow.AddMilliseconds(1200)
-    do {
-      $composer = Find-CodexComposer -Root $selected.Document
-      if ($null -eq $composer) { break }
-
-      $draftText = Get-ComposerDraftText -Composer $composer
-      $hasDraft = -not [string]::IsNullOrWhiteSpace($draftText)
-      if (-not $hasDraft -and -not (Test-ComposerPlaceholder -Name $composer.Current.Name)) {
-        $hasDraft = $true
-      }
-      $selected.Composer = $composer
-      $selected.DraftText = $draftText
-      $selected.HasDraft = $hasDraft
-      if ($selected.HasDraft) { break }
-      Start-Sleep -Milliseconds 50
-    } while ([DateTime]::UtcNow -lt $draftDeadline)
-
-    if (-not $selected.HasDraft -and -not $valuePatternUsed) {
-      Write-CodexWhipResult $false 'SUBMIT_TEXT_NOT_FOUND'
-    }
-    if ($selected.HasDraft -and $selected.DraftText -ne $ExpectedText) {
-      Write-CodexWhipResult $false 'DRAFT_CHANGED'
-    }
-
-    $currentRoot = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$selected.Hwnd)
-    $currentTaskIdentity = Find-CodexTaskIdentity -Root $currentRoot
-    if (
-      $null -eq $currentTaskIdentity -or
-      (-not [string]::IsNullOrWhiteSpace($TargetTaskTitle) -and
-        $currentTaskIdentity.Title -ne $TargetTaskTitle) -or
-      (-not [string]::IsNullOrWhiteSpace($TargetTaskRuntimeId) -and
-        $currentTaskIdentity.RuntimeId -ne $TargetTaskRuntimeId)
-    ) {
-      Write-CodexWhipResult $false 'TARGET_SESSION_MISMATCH' @{
-        currentTaskTitle = if ($null -eq $currentTaskIdentity) { '' } else { $currentTaskIdentity.Title }
-        targetTaskTitle = $TargetTaskTitle
-      }
-    }
-
-    Write-CodexWhipResult $true 'WRITE_READY' @{
-      hwnd = $selected.Hwnd
-      processId = $selected.ProcessId
-      inputMethod = if ($valuePatternUsed) { 'ValuePattern' } else { 'SendInput' }
-      draftVerification = if ($selected.HasDraft) { 'ExactText' } else { 'ValuePatternPending' }
-    }
-  }
-
-  if ($Mode -eq 'commit') {
-    $draftDeadline = [DateTime]::UtcNow.AddMilliseconds(1200)
-    do {
-      $composer = Find-CodexComposer -Root $selected.Document
-      if ($null -eq $composer) { break }
-
-      $draftText = Get-ComposerDraftText -Composer $composer
-      $hasDraft = -not [string]::IsNullOrWhiteSpace($draftText)
-      if (-not $hasDraft -and -not (Test-ComposerPlaceholder -Name $composer.Current.Name)) {
-        $hasDraft = $true
-      }
-      $selected.Composer = $composer
-      $selected.DraftText = $draftText
-      $selected.HasDraft = $hasDraft
-      if ($selected.HasDraft) { break }
-      Start-Sleep -Milliseconds 50
-    } while ([DateTime]::UtcNow -lt $draftDeadline)
-
-    if (-not $selected.HasDraft) {
-      Write-CodexWhipResult $false 'SUBMIT_TEXT_NOT_FOUND'
-    }
-    if ($selected.DraftText -ne $ExpectedText) {
-      Write-CodexWhipResult $false 'DRAFT_CHANGED'
-    }
-
-    $currentRoot = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$selected.Hwnd)
-    $currentTaskIdentity = Find-CodexTaskIdentity -Root $currentRoot
-    if (
-      $null -eq $currentTaskIdentity -or
-      (-not [string]::IsNullOrWhiteSpace($TargetTaskTitle) -and
-        $currentTaskIdentity.Title -ne $TargetTaskTitle) -or
-      (-not [string]::IsNullOrWhiteSpace($TargetTaskRuntimeId) -and
-        $currentTaskIdentity.RuntimeId -ne $TargetTaskRuntimeId)
-    ) {
-      Write-CodexWhipResult $false 'TARGET_SESSION_MISMATCH' @{
-        currentTaskTitle = if ($null -eq $currentTaskIdentity) { '' } else { $currentTaskIdentity.Title }
-        targetTaskTitle = $TargetTaskTitle
-      }
-    }
-
-    Set-CodexForeground -Hwnd $selected.Hwnd
-    $selected.Composer.SetFocus()
-    Start-Sleep -Milliseconds 30
-    if (-not [CodexWhip.NativeMethods]::PressEnter()) {
-      Write-CodexWhipResult $false 'KEYBOARD_UNAVAILABLE'
-    }
-
-    Start-Sleep -Milliseconds 250
-    Write-CodexWhipResult $true 'SUBMIT_INVOKED' @{
-      hwnd = $selected.Hwnd
-      processId = $selected.ProcessId
-    }
-  }
-
   if ($Mode -eq 'send') {
     if ($selected.HasDraft) {
       Write-CodexWhipResult $false 'DRAFT_PRESENT' @{
@@ -849,17 +932,26 @@ namespace CodexWhip {
       Write-CodexWhipResult $false 'SUBMIT_TEXT_NOT_FOUND'
     }
 
-    Set-CodexForeground -Hwnd $selected.Hwnd
-    $selected.Composer.SetFocus()
-    Start-Sleep -Milliseconds 50
+    $composerRuntimeId = Get-AutomationRuntimeId -Element $selected.Composer
+    $beforeMessageRuntimeIds = Get-RuntimeIdLookup -Elements @(
+      Get-ExactTextElements -Document $selected.Document -Text $ExpectedText
+    )
+    $target = Set-And-VerifyComposerFocus `
+      -Hwnd $selected.Hwnd `
+      -ExpectedComposerRuntimeId $composerRuntimeId
 
     $valuePattern = $null
     $valuePatternUsed = $false
-    if ($selected.Composer.TryGetCurrentPattern(
+    if ($target.Composer.TryGetCurrentPattern(
       [System.Windows.Automation.ValuePattern]::Pattern,
       [ref]$valuePattern
     )) {
       try {
+        $target = Get-VerifiedCodexTarget `
+          -Hwnd $selected.Hwnd `
+          -ExpectedComposerRuntimeId $composerRuntimeId `
+          -RequireForeground `
+          -RequireFocus
         $valuePattern.SetValue($ExpectedText)
         $valuePatternUsed = $true
       } catch {
@@ -868,77 +960,26 @@ namespace CodexWhip {
     }
 
     if (-not $valuePatternUsed) {
-      if (-not [CodexWhip.NativeMethods]::SendUnicodeText($ExpectedText)) {
+      $target = Get-VerifiedCodexTarget `
+        -Hwnd $selected.Hwnd `
+        -ExpectedComposerRuntimeId $composerRuntimeId `
+        -RequireForeground `
+        -RequireFocus
+      if (-not [CodexWhip.NativeMethods]::SendUnicodeTextToWindow(
+        [IntPtr]$selected.Hwnd,
+        $ExpectedText
+      )) {
         Write-CodexWhipResult $false 'KEYBOARD_UNAVAILABLE'
       }
     }
 
     $draftDeadline = [DateTime]::UtcNow.AddMilliseconds(1200)
     do {
-      $composer = Find-CodexComposer -Root $selected.Document
-      if ($null -eq $composer) {
-        break
-      }
-
-      $draftText = Get-ComposerDraftText -Composer $composer
-      $hasDraft = -not [string]::IsNullOrWhiteSpace($draftText)
-      if (-not $hasDraft -and -not (Test-ComposerPlaceholder -Name $composer.Current.Name)) {
-        $hasDraft = $true
-      }
-
-      $selected.Composer = $composer
-      $selected.DraftText = $draftText
-      $selected.HasDraft = $hasDraft
-      if ($selected.HasDraft) {
-        break
-      }
-
-      Start-Sleep -Milliseconds 50
-    } while ([DateTime]::UtcNow -lt $draftDeadline)
-
-    $draftVerification = if ($selected.HasDraft) { 'ExactText' } else { 'ValuePatternPending' }
-    if (-not $selected.HasDraft -and -not $valuePatternUsed) {
-      Write-CodexWhipResult $false 'SUBMIT_TEXT_NOT_FOUND'
-    }
-    if ($selected.HasDraft -and $selected.DraftText -ne $ExpectedText) {
-      Write-CodexWhipResult $false 'DRAFT_CHANGED'
-    }
-
-    $currentRoot = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$selected.Hwnd)
-    $currentTaskIdentity = Find-CodexTaskIdentity -Root $currentRoot
-    if (
-      $null -eq $currentTaskIdentity -or
-      (-not [string]::IsNullOrWhiteSpace($TargetTaskTitle) -and
-        $currentTaskIdentity.Title -ne $TargetTaskTitle) -or
-      (-not [string]::IsNullOrWhiteSpace($TargetTaskRuntimeId) -and
-        $currentTaskIdentity.RuntimeId -ne $TargetTaskRuntimeId)
-    ) {
-      Write-CodexWhipResult $false 'TARGET_SESSION_MISMATCH' @{
-        currentTaskTitle = if ($null -eq $currentTaskIdentity) { '' } else { $currentTaskIdentity.Title }
-        targetTaskTitle = $TargetTaskTitle
-      }
-    }
-
-    Set-CodexForeground -Hwnd $selected.Hwnd
-    $selected.Composer.SetFocus()
-    Start-Sleep -Milliseconds $(if ($draftVerification -eq 'ExactText') { 30 } else { 500 })
-    if (-not [CodexWhip.NativeMethods]::PressEnter()) {
-      Write-CodexWhipResult $false 'KEYBOARD_UNAVAILABLE'
-    }
-
-    Start-Sleep -Milliseconds 250
-    Write-CodexWhipResult $true 'SUBMIT_INVOKED' @{
-      hwnd = $selected.Hwnd
-      processId = $selected.ProcessId
-      inputMethod = if ($valuePatternUsed) { 'ValuePattern' } else { 'SendInput' }
-      draftVerification = $draftVerification
-    }
-  }
-
-  if ($Mode -eq 'submit') {
-    $draftDeadline = [DateTime]::UtcNow.AddMilliseconds(1200)
-    do {
-      $composer = Find-CodexComposer -Root $selected.Document
+      $currentTarget = Get-VerifiedCodexTarget `
+        -Hwnd $selected.Hwnd `
+        -ExpectedComposerRuntimeId $composerRuntimeId `
+        -RequireForeground
+      $composer = $currentTarget.Composer
       if ($null -eq $composer) {
         break
       }
@@ -962,130 +1003,40 @@ namespace CodexWhip {
     if (-not $selected.HasDraft) {
       Write-CodexWhipResult $false 'SUBMIT_TEXT_NOT_FOUND'
     }
-    if (
-      -not [string]::IsNullOrWhiteSpace($ExpectedText) -and
-      $selected.DraftText -ne $ExpectedText
-    ) {
+    if ($selected.DraftText -ne $ExpectedText) {
       Write-CodexWhipResult $false 'DRAFT_CHANGED'
     }
 
-    # Node sends Enter after this validation. Never invoke the nearby Stop/停止 button.
-    Set-CodexForeground -Hwnd $selected.Hwnd
-    $selected.Composer.SetFocus()
-    Start-Sleep -Milliseconds 50
-
-    $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
-    if (-not (Test-ContainsAutomationElement -Ancestor $selected.Composer -Element $focused)) {
-      Write-CodexWhipResult $false 'FOCUS_FAILED' @{
-        hwnd = $selected.Hwnd
-        processId = $selected.ProcessId
-      }
+    $target = Get-VerifiedCodexTarget `
+      -Hwnd $selected.Hwnd `
+      -ExpectedComposerRuntimeId $composerRuntimeId `
+      -RequireForeground `
+      -RequireFocus
+    if (-not [CodexWhip.NativeMethods]::PressEnterToWindow([IntPtr]$selected.Hwnd)) {
+      Write-CodexWhipResult $false 'KEYBOARD_UNAVAILABLE'
     }
 
-    Write-CodexWhipResult $true 'SUBMIT_READY' @{
-      hwnd = $selected.Hwnd
-      processId = $selected.ProcessId
-    }
-  }
-
-  if ($Mode -eq 'steer') {
-    $textCondition = New-Object System.Windows.Automation.PropertyCondition(
-      [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-      [System.Windows.Automation.ControlType]::Text
-    )
-    $textElements = $selected.Document.FindAll(
-      [System.Windows.Automation.TreeScope]::Descendants,
-      $textCondition
-    )
-    $matchingTexts = @()
-    for ($textIndex = 0; $textIndex -lt $textElements.Count; $textIndex++) {
-      $textElement = $textElements.Item($textIndex)
-      if ($textElement.Current.Name.Trim() -eq $ExpectedText.Trim()) {
-        $matchingTexts += $textElement
-      }
-    }
-
-    if ($matchingTexts.Count -eq 0) {
-      Write-CodexWhipResult $false 'STEER_PENDING' @{
-        hwnd = $selected.Hwnd
-        processId = $selected.ProcessId
-      }
-    }
-
-    $buttonCondition = New-Object System.Windows.Automation.PropertyCondition(
-      [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-      [System.Windows.Automation.ControlType]::Button
-    )
-    $buttons = $selected.Document.FindAll(
-      [System.Windows.Automation.TreeScope]::Descendants,
-      $buttonCondition
-    )
-    $steerCandidates = @()
-    $nearbySteerWithoutInvoke = $false
-
-    for ($index = 0; $index -lt $buttons.Count; $index++) {
-      $button = $buttons.Item($index)
-      if (
-        $button.Current.IsOffscreen -or
-        -not $button.Current.IsEnabled -or
-        -not (Test-SteerAction -Button $button)
-      ) {
-        continue
+    $clearDeadline = [DateTime]::UtcNow.AddMilliseconds(1200)
+    do {
+      $currentTarget = Get-VerifiedCodexTarget `
+        -Hwnd $selected.Hwnd `
+        -ExpectedComposerRuntimeId $composerRuntimeId `
+        -RequireForeground
+      $composer = $currentTarget.Composer
+      $draftText = Get-ComposerDraftText -Composer $composer
+      $hasDraft = -not [string]::IsNullOrWhiteSpace($draftText)
+      if (-not $hasDraft -and -not (Test-ComposerPlaceholder -Name $composer.Current.Name)) {
+        $hasDraft = $true
       }
 
-      $buttonBounds = $button.Current.BoundingRectangle
-      for ($textIndex = 0; $textIndex -lt $matchingTexts.Count; $textIndex++) {
-        $textElement = $matchingTexts[$textIndex]
-        if ($textElement.Current.IsOffscreen) {
-          continue
-        }
-        $textBounds = $textElement.Current.BoundingRectangle
-        $sameContainer = Test-SameCompactContainer -Left $textElement -Right $button
-        $nearby = (
-          [Math]::Abs($textBounds.Y - $buttonBounds.Y) -le 120 -and
-          $buttonBounds.X -ge ($textBounds.X - 40) -and
-          $buttonBounds.X -le ($textBounds.Right + 500)
-        )
-        if (-not $sameContainer -and -not $nearby) {
-          continue
-        }
-
-        $invokePattern = $null
-        if (-not $button.TryGetCurrentPattern(
-          [System.Windows.Automation.InvokePattern]::Pattern,
-          [ref]$invokePattern
-        )) {
-          $nearbySteerWithoutInvoke = $true
-          continue
-        }
-
-        $score = [Math]::Abs($textBounds.Y - $buttonBounds.Y)
-        if ($sameContainer) {
-          $score -= 1000
-        }
-        $steerCandidates += [pscustomobject]@{
-          Score = $score
-          InvokePattern = $invokePattern
-        }
+      $selected.Composer = $composer
+      $selected.DraftText = $draftText
+      $selected.HasDraft = $hasDraft
+      if (-not $selected.HasDraft) {
+        break
       }
-    }
-
-    if ($steerCandidates.Count -gt 0) {
-      $selectedAction = $steerCandidates | Sort-Object Score | Select-Object -First 1
-      $selectedAction.InvokePattern.Invoke()
-      Start-Sleep -Milliseconds 250
-      Write-CodexWhipResult $true 'QUEUED_MESSAGE_STEERED' @{
-        hwnd = $selected.Hwnd
-        processId = $selected.ProcessId
-      }
-    }
-
-    if ($nearbySteerWithoutInvoke) {
-      Write-CodexWhipResult $false 'STEER_INVOKE_UNAVAILABLE' @{
-        hwnd = $selected.Hwnd
-        processId = $selected.ProcessId
-      }
-    }
+      Start-Sleep -Milliseconds 50
+    } while ([DateTime]::UtcNow -lt $clearDeadline)
 
     if ($selected.HasDraft) {
       Write-CodexWhipResult $false 'SUBMIT_FAILED' @{
@@ -1094,7 +1045,67 @@ namespace CodexWhip {
       }
     }
 
-    Write-CodexWhipResult $true 'ALREADY_STEERED' @{
+    $deliveryDeadline = [DateTime]::UtcNow.AddMilliseconds(2500)
+    $steerInvoked = $false
+    do {
+      $currentTarget = Get-VerifiedCodexTarget `
+        -Hwnd $selected.Hwnd `
+        -ExpectedComposerRuntimeId $composerRuntimeId `
+        -RequireForeground
+      $newMessages = @(
+        Get-NewExactTextElements `
+          -Document $currentTarget.Document `
+          -Text $ExpectedText `
+          -BeforeRuntimeIds $beforeMessageRuntimeIds
+      )
+      $submittedMessages = @(
+        $newMessages | Where-Object { Test-IsSubmittedUserMessage -TextElement $_ }
+      )
+
+      if ($submittedMessages.Count -gt 1 -or ($newMessages.Count -gt 1 -and -not $steerInvoked)) {
+        Write-CodexWhipResult $false 'DELIVERY_AMBIGUOUS' @{
+          hwnd = $selected.Hwnd
+          processId = $selected.ProcessId
+          candidateCount = $newMessages.Count
+        }
+      }
+      if ($submittedMessages.Count -eq 1) {
+        Write-CodexWhipResult $true $(if ($steerInvoked) {
+          'QUEUED_MESSAGE_STEERED'
+        } else {
+          'MESSAGE_DELIVERED'
+        }) @{
+          hwnd = $selected.Hwnd
+          processId = $selected.ProcessId
+          messageRuntimeId = Get-AutomationRuntimeId -Element $submittedMessages[0]
+          inputMethod = if ($valuePatternUsed) { 'ValuePattern' } else { 'SendInput' }
+          draftVerification = 'ExactText'
+        }
+      }
+
+      if (-not $steerInvoked -and $newMessages.Count -eq 1) {
+        $steerActions = @(Get-SteerActionsForText -TextElement $newMessages[0])
+        if ($steerActions.Count -gt 1) {
+          Write-CodexWhipResult $false 'DELIVERY_AMBIGUOUS' @{
+            hwnd = $selected.Hwnd
+            processId = $selected.ProcessId
+            candidateCount = $steerActions.Count
+          }
+        }
+        if ($steerActions.Count -eq 1) {
+          $steerActions[0].InvokePattern.Invoke()
+          $steerInvoked = $true
+        }
+      }
+
+      Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deliveryDeadline)
+
+    Write-CodexWhipResult $false $(if ($steerInvoked) {
+      'STEER_DELIVERY_UNCONFIRMED'
+    } else {
+      'DELIVERY_UNCONFIRMED'
+    }) @{
       hwnd = $selected.Hwnd
       processId = $selected.ProcessId
     }

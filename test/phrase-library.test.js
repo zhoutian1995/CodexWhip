@@ -88,6 +88,22 @@ test('file watcher reloads a changed phrase file after debounce', async t => {
   assert.deepEqual(result.phrases, ['周老板一声令下，补丁立刻交付']);
 });
 
+test('file watcher errors keep the last valid phrases without crashing', t => {
+  const library = makeTempLibrary(t, { debounceMs: 1000 });
+  library.load();
+  library.watch();
+  const previous = library.phrases;
+  let update;
+  library.once('updated', result => { update = result; });
+
+  library.watcher.emit('error', new Error('simulated watcher failure'));
+
+  assert.equal(update.ok, false);
+  assert.equal(update.code, 'PHRASES_WATCH_FAILED');
+  assert.equal(library.phrases, previous);
+  assert.equal(library.watcher, null);
+});
+
 test('random selection covers both ends of a valid list', () => {
   const phrases = ['第一句', '第二句'];
   assert.equal(choosePhrase(phrases, () => 0), '第一句');

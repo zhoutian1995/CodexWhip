@@ -41,7 +41,7 @@ CodexWhip 是一个 Windows 桌面外挂。它给 Codex Desktop 配备了一根�
 
 1. 装好官方 Codex Desktop，打开它。
 2. 让 CodexWhip 和 Codex Desktop 用相同权限运行。别一个管理员一个普通，否则鞭子打不进去。
-3. CodexWhip 会自动把 Codex Desktop 的 `Follow-up behavior` 固定为 `Steer`，写入 `%USERPROFILE%\.codex\config.toml` 的 `desktop.followUpQueueMode`。这样左键消息直接加入当前运行，不会先生成一张带“引导”按钮的排队卡片。如果它无法确认这个设置，**它宁可不打，也不空打**，原因只在托盘菜单里显示。
+3. 在 Codex 的 `Settings > General > Follow-up behavior` 里选择 `Steer`。CodexWhip 只用 TOML 解析器读取并确认这个设置，**不会自动改写** `%USERPROFILE%\.codex\config.toml`。这样左键消息直接加入当前运行，不会先生成一张带“引导”按钮的排队卡片。如果它无法确认这个设置，**它宁可不打，也不空打**，原因只在托盘菜单里显示。
 
 也就是说：设置一次，之后它就只认 `Steer`，简单粗暴。
 
@@ -65,6 +65,8 @@ CodexWhip 是一个 Windows 桌面外挂。它给 Codex Desktop 配备了一根�
 - 输入框里已经有你没发出去的草稿，它绝不清空、绝不覆盖。
 - 它和 Codex 的权限等级不一致。
 - 它无法确认 Steer 设置。
+- 抢到焦点后，前台窗口、输入框或任务身份发生了任何变化。
+- 发送后找不到唯一新增的消息节点，或无法证明消息已经进入任务。
 
 一句话：**宁可让 Codex 继续摸鱼，也不打错人。**
 
@@ -146,7 +148,14 @@ npm run dist:win
 - `CodexWhip Setup <version>.exe`
 - `CodexWhip Portable <version>.exe`
 
-环境要求：Windows、Node.js >= 18。
+环境要求：Windows。开发和构建建议使用 Node.js >= 22.12；已安装的桌面程序不需要单独安装 Node.js。
+
+安全回归：
+
+- 文字和 Enter 在同一个 PowerShell UI Automation 事务里完成。
+- 每次全局键盘注入前都复核前台 HWND、输入焦点、任务标题和 runtime ID。
+- 发送前记录同文消息 runtime ID，发送后只接受唯一新增节点；重复催促词不会去猜历史消息。
+- 没有正向投递证据时返回失败，不会把“输入框空了”冒充成发送成功。
 
 ---
 
