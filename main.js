@@ -36,13 +36,13 @@ const {
   resolveWhipStyle,
 } = require('./lib/whip-styles');
 const { loadSettings, saveSettings } = require('./lib/settings-store');
+const { WhipSendScheduler } = require('./lib/whip-send-scheduler');
 
 let tray;
 let overlay;
 let overlayReady = false;
 let spawnQueued = false;
-let sendInFlight = false;
-let lastSendAt = 0;
+let whipSendScheduler = null;
 let revealOverlayOnReady = false;
 let boundSession = null;
 let trayStatus = '未绑定任务';
@@ -122,6 +122,24 @@ function statusForResult(result) {
     return `${base}：${shorten(result.currentTaskTitle, 20)}`;
   }
   return base;
+}
+
+function getWhipSendScheduler() {
+  if (whipSendScheduler) return whipSendScheduler;
+  whipSendScheduler = new WhipSendScheduler({
+    cooldownMs: SEND_COOLDOWN_MS,
+    run: performWhipSend,
+    onQueued: result => {
+      setTrayStatus(result.coalesced
+        ? '已有一鞭排队，重复点击已合并'
+        : '已记下一鞭，上一句完成后自动发送');
+    },
+    onQueuedError: error => {
+      console.warn('codexwhip: queued send failed:', error?.message || error);
+      setTrayStatus('排队发送失败：桌面自动化异常');
+    },
+  });
+  return whipSendScheduler;
 }
 
 function isOverlayVisible() {
@@ -433,25 +451,16 @@ function restoreOverlayAfterDesktopSend() {
   }
 }
 
-ipcMain.handle('whip-crack', async () => {
-  const now = Date.now();
-  if (sendInFlight || now - lastSendAt < SEND_COOLDOWN_MS) {
-    return {
-      status: 'cooldown',
-      retryAfterMs: Math.max(0, SEND_COOLDOWN_MS - (now - lastSendAt)),
-    };
-  }
-  if (!boundSession) {
-    await restoreSavedSession();
-  }
-  if (!boundSession) {
-    setTrayStatus('请先绑定 Codex 任务');
-    return { status: 'unbound', code: 'TARGET_SESSION_REQUIRED' };
-  }
-
-  sendInFlight = true;
-  lastSendAt = now;
+async function performWhipSend() {
   try {
+    if (!boundSession) {
+      await restoreSavedSession();
+    }
+    if (!boundSession) {
+      setTrayStatus('请先绑定 Codex 任务');
+      return { status: 'unbound', code: 'TARGET_SESSION_REQUIRED' };
+    }
+
     const phrase = phraseLibrary?.choose() || DEFAULT_PHRASES[0];
     const result = await sendWhipMessage({
       phrase,
@@ -471,16 +480,18 @@ ipcMain.handle('whip-crack', async () => {
     boundSession.hwnd = result.hwnd;
     boundSession.processId = result.processId;
     console.log(`codexwhip: sent "${result.phrase}" to Codex Desktop`);
-    setTrayStatus(`已发送：${result.phrase}`);
+    setTrayStatus(getWhipSendScheduler().hasPending
+      ? `已发送，下一鞭排队中：${result.phrase}`
+      : `已发送：${result.phrase}`);
     return responseForResult(result);
   } catch (error) {
     console.warn('codexwhip: desktop send failed:', error?.message || error);
     setTrayStatus('发送失败：桌面自动化异常');
     return { status: 'failed', code: 'DESKTOP_AUTOMATION_FAILED' };
-  } finally {
-    sendInFlight = false;
   }
-});
+}
+
+ipcMain.handle('whip-crack', () => getWhipSendScheduler().request());
 
 ipcMain.on('hide-overlay', hideOverlay);
 
@@ -546,6 +557,7 @@ if (!hasSingleInstanceLock) {
 
 app.on('will-quit', () => {
   clearTimeout(dropHideTimer);
+  whipSendScheduler?.dispose();
   phraseLibrary?.close();
   globalShortcut.unregisterAll();
 });

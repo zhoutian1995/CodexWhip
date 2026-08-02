@@ -135,21 +135,16 @@ test('overlay stays visible after left click and supports three close controls',
   const mouseDownHandler = overlay.match(
     /document\.addEventListener\('mousedown',[\s\S]*?\n\}\);/u
   )?.[0] || '';
-  const mouseUpHandler = overlay.match(
-    /document\.addEventListener\('mouseup',[\s\S]*?\n\}\);/u
-  )?.[0] || '';
   assert.match(mouseDownHandler, /triggerCrackAnimation\(\)/u);
-  assert.doesNotMatch(mouseDownHandler, /window\.bridge\.whipCrack\(\)/u);
-  assert.match(mouseUpHandler, /leftWhipPending\s*=\s*false/u);
-  assert.match(mouseUpHandler, /setTimeout\(\(\)\s*=>\s*\{/u);
-  assert.match(mouseUpHandler, /window\.bridge\.whipCrack\(\)/u);
-  assert.match(mouseUpHandler, /\},\s*500\)/u);
+  assert.match(mouseDownHandler, /setTimeout\(\(\)\s*=>\s*\{/u);
+  assert.match(mouseDownHandler, /window\.bridge\.whipCrack\(\)/u);
+  assert.match(mouseDownHandler, /CRACK_SEND_DELAY_MS/u);
+  assert.doesNotMatch(overlay, /document\.addEventListener\('mouseup'/u);
   assert.doesNotMatch(
     overlay,
     /window\.bridge\.whipCrack\(\)[\s\S]{0,120}dropping\s*=\s*true/u
   );
-  assert.match(overlay, /LOCAL_SEND_COOLDOWN_MS\s*=\s*1500/u);
-  assert.match(overlay, /let leftWhipPending\s*=\s*false/u);
+  assert.doesNotMatch(overlay, /LOCAL_SEND_COOLDOWN_MS|leftWhipPending|lastWhipRequestAt/u);
   assert.match(overlay, /function scheduleFrame\(\)/u);
   assert.match(overlay, /function getWhipBounds\(\)/u);
   assert.match(overlay, /AUDIO_BY_STYLE/u);
@@ -169,6 +164,8 @@ test('overlay stays visible after left click and supports three close controls',
   assert.match(preload, /ipcRenderer\.invoke\('whip-crack'\)/u);
   assert.match(preload, /onRefreshWhip/u);
   assert.match(main, /ipcMain\.handle\('whip-crack'/u);
+  assert.match(main, /new WhipSendScheduler/u);
+  assert.match(main, /已记下一鞭，上一句完成后自动发送/u);
   assert.match(main, /beforeDesktopSendFn:\s*lowerOverlayForDesktopSend/u);
   assert.match(main, /afterDesktopSendFn:\s*restoreOverlayAfterDesktopSend/u);
   assert.match(main, /setIgnoreMouseEvents\(true\)/u);

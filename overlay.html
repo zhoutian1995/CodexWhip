@@ -72,11 +72,9 @@ let closing = false;
 let handleAngle = P.baseTargetAngle;
 let handleAngVel = 0;
 let crackPulse = 0;
-let lastWhipRequestAt = 0;
 let lastCrackResult = { status: 'idle' };
-let leftWhipPending = false;
 
-const LOCAL_SEND_COOLDOWN_MS = 1500;
+const CRACK_SEND_DELAY_MS = 220;
 const MOTION_EPSILON = 0.12;
 const MAX_IDLE_PHYSICS_FRAMES = 90;
 const SETTLE_FRAMES = 4;
@@ -219,9 +217,7 @@ function resetWhipState(mx, my) {
   handleAngle = P.baseTargetAngle;
   handleAngVel = 0;
   crackPulse = 0;
-  lastWhipRequestAt = 0;
   lastCrackResult = { status: 'idle' };
-  leftWhipPending = false;
   document.body.dataset.whipStatus = 'idle';
   idlePhysicsFrames = 0;
   settleFrames = 0;
@@ -780,7 +776,7 @@ let animationFrameId = null;
 let lastFrameAt = 0;
 let idlePhysicsFrames = 0;
 let settleFrames = 0;
-window.__codexWhipMetrics = { renderCosts: [], frameIntervals: [] };
+window.__codexWhipMetrics = { renderCosts: [], frameIntervals: [], totalFrames: 0 };
 
 function scheduleFrame() {
   if (animationFrameId !== null) return;
@@ -800,6 +796,7 @@ function loop(timestamp) {
   lastFrameAt = timestamp;
   const state = update();
   draw();
+  window.__codexWhipMetrics.totalFrames++;
   window.__codexWhipMetrics.renderCosts.push(performance.now() - renderStartedAt);
   if (window.__codexWhipMetrics.renderCosts.length > 180) {
     window.__codexWhipMetrics.renderCosts.shift();
@@ -835,28 +832,14 @@ document.addEventListener('mousedown', event => {
   if (!whip && !dropping && !closing) resetWhipState(event.clientX, event.clientY);
   if (!whip || dropping || closing) return;
   if (event.button === 2) {
-    leftWhipPending = false;
     startDropping();
     return;
   }
   if (event.button !== 0) return;
   triggerCrackAnimation();
   scheduleFrame();
-  const now = Date.now();
-  if (now - lastWhipRequestAt < LOCAL_SEND_COOLDOWN_MS) {
-    leftWhipPending = false;
-    return;
-  }
-  leftWhipPending = true;
   playCrackSound();
-});
-
-document.addEventListener('mouseup', event => {
-  if (event.button !== 0 || !leftWhipPending) return;
-  leftWhipPending = false;
-  lastWhipRequestAt = Date.now();
   setTimeout(() => {
-    if (!whip || dropping) return;
     window.bridge.whipCrack()
       .then(result => {
         lastCrackResult = result || { status: 'failed', code: 'EMPTY_RESPONSE' };
@@ -866,7 +849,7 @@ document.addEventListener('mouseup', event => {
         lastCrackResult = { status: 'failed', code: 'IPC_FAILED' };
         document.body.dataset.whipStatus = lastCrackResult.status;
       });
-  }, 500);
+  }, CRACK_SEND_DELAY_MS);
 });
 
 document.addEventListener('contextmenu', event => event.preventDefault());
