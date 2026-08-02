@@ -22,6 +22,15 @@ test('style registry exposes five public styles with unique audio', () => {
   assert.equal(new Set(catalog.flatMap(style => style.soundSources)).size, 5);
 });
 
+test('crop uses a rigid shaft and a bounded hinged flap', () => {
+  const crop = getStyleCatalog().find(style => style.id === 'crop');
+  assert.equal(crop.physicsMode, 'rigid-crop');
+  assert.equal(Object.hasOwn(crop.physics, 'lashLength'), false);
+  assert.ok(crop.physics.shaftLength >= 220);
+  assert.ok(crop.physics.flapLength >= 30 && crop.physics.flapLength <= 50);
+  assert.ok(crop.physics.flapMaxAngle > 0 && crop.physics.flapMaxAngle <= Math.PI / 4);
+});
+
 test('unknown settings fall back to the leather whip', () => {
   assert.equal(normalizeStyleId('unknown'), DEFAULT_STYLE_ID);
   assert.equal(normalizeStyleId(null), DEFAULT_STYLE_ID);

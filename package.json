@@ -1,6 +1,6 @@
 {
   "name": "codexwhip",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "A Windows desktop whip for Codex Desktop",
   "author": "zhoutian1995",
   "license": "MIT",
@@ -41,6 +41,11 @@
   "devDependencies": {
     "electron": "41.7.1",
     "electron-builder": "26.15.3"
+  },
+  "overrides": {
+    "app-builder-lib": {
+      "@noble/hashes": "1.8.0"
+    }
   },
   "build": {
     "appId": "com.weiling.codexwhip",

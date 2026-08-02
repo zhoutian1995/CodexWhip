@@ -130,6 +130,70 @@ async function exerciseStyle(window, styleId) {
   };
 }
 
+async function exerciseCropRig(window) {
+  await window.webContents.executeJavaScript(`
+    document.dispatchEvent(new MouseEvent('mousemove', { clientX: 640, clientY: 430 }));
+    true;
+  `);
+  window.webContents.send('spawn-whip', {
+    styleId: 'crop',
+    style: STYLE_BY_ID.get('crop'),
+  });
+  await delay(30);
+  await window.webContents.executeJavaScript(`
+    window.__codexWhipDebug.reset(window.innerWidth * 0.48, window.innerHeight * 0.62);
+    true;
+  `);
+  await delay(900);
+  const rest = await window.webContents.executeJavaScript(
+    'window.__codexWhipDebug.getState()'
+  );
+
+  await window.webContents.executeJavaScript(`
+    window.__codexWhipDebug.triggerCrack();
+    true;
+  `);
+  await delay(70);
+  const image = await window.webContents.capturePage();
+  const screenshotPath = path.join(os.tmpdir(), `codexwhip-${PACKAGE_VERSION}-crop-rig.png`);
+  fs.writeFileSync(screenshotPath, image.toPNG());
+
+  const samples = [];
+  for (let index = 0; index < 18; index++) {
+    samples.push(await window.webContents.executeJavaScript(
+      'window.__codexWhipDebug.getState()'
+    ));
+    await delay(40);
+  }
+  await delay(900);
+  const settled = await window.webContents.executeJavaScript(
+    'window.__codexWhipDebug.getState()'
+  );
+  const allStates = [rest, ...samples, settled];
+  const peakFlapDeflection = Math.max(...samples.map(state => (
+    Math.abs(state.cropFlapAngle - state.cropFlapRestAngle)
+  )));
+  const maxFlapAngle = Math.max(...allStates.map(state => Math.abs(state.cropFlapAngle)));
+  const maxShaftError = Math.max(...allStates.map(state => (
+    Math.abs(state.shaftLength - state.targetShaftLength)
+  )));
+
+  return {
+    nodeCount: rest.nodeCount,
+    restAnchor: [Number(rest.anchorX.toFixed(2)), Number(rest.anchorY.toFixed(2))],
+    restShaftEnd: [Number(rest.shaftEndX.toFixed(2)), Number(rest.shaftEndY.toFixed(2))],
+    restFlapDeflection: Number(Math.abs(rest.cropFlapAngle - rest.cropFlapRestAngle).toFixed(4)),
+    peakFlapDeflection: Number(peakFlapDeflection.toFixed(4)),
+    settledFlapDeflection: Number(
+      Math.abs(settled.cropFlapAngle - settled.cropFlapRestAngle).toFixed(4)
+    ),
+    maxFlapAngle: Number(maxFlapAngle.toFixed(4)),
+    flapAngleLimit: rest.cropFlapMaxAngle,
+    maxShaftError: Number(maxShaftError.toFixed(4)),
+    screenshotPath,
+  };
+}
+
 async function exerciseViewport(window, { width, height, zoomFactor }) {
   window.setSize(width, height);
   window.webContents.setZoomFactor(zoomFactor);
@@ -223,6 +287,7 @@ async function main() {
       sandbox: true,
     },
   });
+  window.setIgnoreMouseEvents(true);
   await window.loadFile(path.join(ROOT, 'overlay.html'));
   const readyState = await window.webContents.executeJavaScript(`({
     bridge: typeof window.bridge,
@@ -236,6 +301,7 @@ async function main() {
   for (const styleId of STYLE_IDS) {
     results.push(await exerciseStyle(window, styleId));
   }
+  const cropRig = await exerciseCropRig(window);
   const viewportResults = [];
   for (const viewport of [
     { width: 1920, height: 1080, zoomFactor: 1 },
@@ -251,19 +317,32 @@ async function main() {
   ipcMain.removeAllListeners('hide-overlay');
   process.stdout.write(`${JSON.stringify({
     interactions,
+    cropRig,
     idleStop,
     styles: results,
     viewports: viewportResults,
   }, null, 2)}\n`);
-  if (interactions.singleRequestCount !== 1) process.exitCode = 1;
-  if (interactions.rapidRequestCount !== 3) process.exitCode = 1;
-  if (interactions.closePreservedRequestCount !== 1) process.exitCode = 1;
-  if (interactions.hideRequestCount < 1) process.exitCode = 1;
-  if (idleStop.additionalFrames > 2) process.exitCode = 1;
-  if (results.some(result => result.activeStyle !== result.styleId)) process.exitCode = 1;
-  if (results.some(result => result.p95RenderCostMs > 33)) process.exitCode = 1;
-  if (results.some(result => result.p95FrameIntervalMs > 34 || result.frames < 20)) process.exitCode = 1;
-  if (viewportResults.some(result => result.highContrastSamples < 20)) process.exitCode = 1;
+  const failures = [];
+  if (interactions.singleRequestCount !== 1) failures.push('single click IPC count');
+  if (interactions.rapidRequestCount !== 3) failures.push('rapid click IPC count');
+  if (interactions.closePreservedRequestCount !== 1) failures.push('close preserves queued click');
+  if (interactions.hideRequestCount < 1) failures.push('right click hides overlay');
+  if (cropRig.nodeCount !== 2) failures.push('crop node count');
+  if (cropRig.restFlapDeflection > 0.12) failures.push('crop rest angle');
+  if (cropRig.peakFlapDeflection < 0.12) failures.push('crop crack movement');
+  if (cropRig.settledFlapDeflection >= cropRig.peakFlapDeflection * 0.45) {
+    failures.push('crop flap rebound');
+  }
+  if (cropRig.maxFlapAngle > cropRig.flapAngleLimit + 0.001) failures.push('crop flap limit');
+  if (cropRig.maxShaftError > 2.5) failures.push('crop rigid shaft length');
+  if (idleStop.additionalFrames > 2) failures.push('idle frame stop');
+  if (results.some(result => result.activeStyle !== result.styleId)) failures.push('style activation');
+  if (results.some(result => result.p95RenderCostMs > 33)) failures.push('render cost');
+  if (results.some(result => result.p95FrameIntervalMs > 34 || result.frames < 20)) {
+    failures.push('frame cadence');
+  }
+  if (viewportResults.some(result => result.highContrastSamples < 20)) failures.push('viewport rendering');
+  if (failures.length) throw new Error(`overlay visual smoke failed: ${failures.join(', ')}`);
 }
 
 app.on('window-all-closed', () => {});
