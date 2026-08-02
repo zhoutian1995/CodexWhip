@@ -64,16 +64,6 @@ function leather() {
   });
 }
 
-function crop() {
-  const noise = seededNoise(1402);
-  return makeSamples(0.42, t => {
-    const crack = noise() * envelope(t, 0.035, 0.0008, 0.017) * 2.7;
-    const click = Math.sin(Math.PI * 2 * 1850 * t) * envelope(t, 0.036, 0.001, 0.026) * 0.9;
-    const slap = noise() * envelope(t, 0.082, 0.001, 0.025) * 0.72;
-    return crack + click + slap;
-  });
-}
-
 function flogger() {
   const noise = seededNoise(1403);
   const hits = [0.08, 0.104, 0.129, 0.158, 0.19];
@@ -116,7 +106,6 @@ function cyber() {
 fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 const sounds = {
   'leather.wav': leather(),
-  'crop.wav': crop(),
   'flogger.wav': flogger(),
   'chain.wav': chain(),
   'cyber.wav': cyber(),

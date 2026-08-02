@@ -9,26 +9,16 @@ const {
   resolveWhipStyle,
 } = require('../lib/whip-styles');
 
-test('style registry exposes five public styles with unique audio', () => {
+test('style registry exposes four public styles with unique audio', () => {
   const catalog = getStyleCatalog();
-  assert.equal(catalog.length, 5);
+  assert.equal(catalog.length, 4);
   assert.deepEqual(catalog.map(style => style.id), [
     'leather',
-    'crop',
     'flogger',
     'chain',
     'cyber',
   ]);
-  assert.equal(new Set(catalog.flatMap(style => style.soundSources)).size, 5);
-});
-
-test('crop uses a rigid shaft and a bounded hinged flap', () => {
-  const crop = getStyleCatalog().find(style => style.id === 'crop');
-  assert.equal(crop.physicsMode, 'rigid-crop');
-  assert.equal(Object.hasOwn(crop.physics, 'lashLength'), false);
-  assert.ok(crop.physics.shaftLength >= 220);
-  assert.ok(crop.physics.flapLength >= 30 && crop.physics.flapLength <= 50);
-  assert.ok(crop.physics.flapMaxAngle > 0 && crop.physics.flapMaxAngle <= Math.PI / 4);
+  assert.equal(new Set(catalog.flatMap(style => style.soundSources)).size, 4);
 });
 
 test('unknown settings fall back to the leather whip', () => {

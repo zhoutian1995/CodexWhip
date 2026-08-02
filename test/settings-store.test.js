@@ -32,17 +32,19 @@ test('settings persist fixed and random modes', t => {
   assert.equal(loadSettings(filePath).settings.whipStyle, 'random');
 });
 
-test('invalid JSON and unknown styles fall back without throwing', t => {
+test('invalid JSON, unknown styles and the removed crop fall back without throwing', t => {
   const filePath = makeSettingsPath(t);
   fs.writeFileSync(filePath, '{ broken', 'utf8');
   assert.equal(loadSettings(filePath).code, 'SETTINGS_INVALID');
   fs.writeFileSync(filePath, '{"whipStyle":"mystery"}', 'utf8');
   assert.equal(loadSettings(filePath).settings.whipStyle, 'leather');
+  fs.writeFileSync(filePath, '{"whipStyle":"crop"}', 'utf8');
+  assert.equal(loadSettings(filePath).settings.whipStyle, 'leather');
 });
 
 test('failed atomic replacement preserves the previous settings', t => {
   const filePath = makeSettingsPath(t);
-  assert.equal(saveSettings(filePath, { whipStyle: 'crop' }).ok, true);
+  assert.equal(saveSettings(filePath, { whipStyle: 'flogger' }).ok, true);
 
   const originalRename = fs.renameSync;
   fs.renameSync = function patchedRename(source, destination) {
@@ -52,5 +54,5 @@ test('failed atomic replacement preserves the previous settings', t => {
   t.after(() => { fs.renameSync = originalRename; });
 
   assert.equal(saveSettings(filePath, { whipStyle: 'chain' }).ok, false);
-  assert.equal(loadSettings(filePath).settings.whipStyle, 'crop');
+  assert.equal(loadSettings(filePath).settings.whipStyle, 'flogger');
 });

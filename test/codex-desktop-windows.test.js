@@ -149,7 +149,6 @@ test('overlay stays visible after left click and supports three close controls',
   assert.match(overlay, /function getWhipBounds\(\)/u);
   assert.match(overlay, /AUDIO_BY_STYLE/u);
   assert.match(overlay, /mode === 'multi-tail'/u);
-  assert.match(overlay, /mode === 'rigid-crop'/u);
   assert.match(overlay, /function drawChain\(\)/u);
   assert.match(overlay, /function drawCyber\(\)/u);
   assert.match(overlay, /Math\.min\(6,/u);

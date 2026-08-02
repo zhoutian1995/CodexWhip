@@ -153,28 +153,6 @@ function htmlFor(mode, width, height) {
       strokePath(path, 18 * scale, 12 * scale, 2 * scale);
     }
 
-    function drawCrop(x, y, scale) {
-      ctx.save();
-      ctx.lineCap = 'round';
-      ctx.strokeStyle = '#420914';
-      ctx.lineWidth = 20 * scale;
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x + 350 * scale, y - 110 * scale);
-      ctx.stroke();
-      ctx.strokeStyle = '#08090b';
-      ctx.lineWidth = 12 * scale;
-      ctx.stroke();
-      ctx.fillStyle = '#08090b';
-      ctx.strokeStyle = '#b51c31';
-      ctx.lineWidth = 4 * scale;
-      ctx.beginPath();
-      ctx.roundRect(x + 330 * scale, y - 140 * scale, 105 * scale, 56 * scale, 18 * scale);
-      ctx.fill();
-      ctx.stroke();
-      ctx.restore();
-    }
-
     function drawFlogger(x, y, scale) {
       for (let index = 0; index < 7; index++) {
         const offset = (index - 3) * 17 * scale;
@@ -255,7 +233,7 @@ function htmlFor(mode, width, height) {
       ctx.fillRect(566, 256, 118, 8);
       ctx.fillStyle = '#c7c9cc';
       ctx.font = '600 38px Microsoft YaHei, Segoe UI, sans-serif';
-      ctx.fillText('五种鞭子，一次绑定，连续抽打', 560, 333);
+      ctx.fillText('四种鞭子，一次绑定，连续抽打', 560, 333);
       ctx.fillStyle = '#777d85';
       ctx.font = '500 25px Microsoft YaHei, Segoe UI, sans-serif';
       ctx.fillText('公开暗黑器具美学 · 无露骨内容 · Windows Codex Desktop', 562, 389);
@@ -265,13 +243,13 @@ function htmlFor(mode, width, height) {
       background();
       ctx.fillStyle = '#f5f5f4';
       ctx.font = '800 52px Microsoft YaHei, Segoe UI, sans-serif';
-      ctx.fillText('五种鞭子，五种催活手感', 64, 78);
+      ctx.fillText('四种鞭子，四种催活手感', 64, 78);
       ctx.fillStyle = '#d7243d';
       ctx.fillRect(65, 102, 120, 6);
-      const labels = ['黑红长皮鞭', '短马鞭', '七尾多尾鞭', '银黑锁链鞭', '赛博高压电缆鞭'];
-      const drawers = [drawLeatherWhip, drawCrop, drawFlogger, drawChain, drawCyber];
-      const column = W / 5;
-      for (let index = 0; index < 5; index++) {
+      const labels = ['黑红长皮鞭', '七尾多尾鞭', '银黑锁链鞭', '赛博高压电缆鞭'];
+      const drawers = [drawLeatherWhip, drawFlogger, drawChain, drawCyber];
+      const column = W / 4;
+      for (let index = 0; index < 4; index++) {
         const left = index * column;
         if (index > 0) {
           ctx.strokeStyle = '#351018';

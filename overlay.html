@@ -81,7 +81,6 @@ const SETTLE_FRAMES = 4;
 const TARGET_FRAME_INTERVAL_MS = 1000 / 30;
 const SOUND_PROFILES = Object.freeze({
   leather: { rate: 0.94, volume: 1 },
-  crop: { rate: 1.16, volume: 0.92 },
   flogger: { rate: 0.84, volume: 1 },
   chain: { rate: 0.9, volume: 1 },
   cyber: { rate: 1.06, volume: 0.95 },
@@ -164,27 +163,6 @@ function spawnWhip(mx, my) {
       spreads.push(spread);
     }
     return { mode, chains, spreads };
-  }
-
-  if (mode === 'rigid-crop') {
-    const angle = P.baseTargetAngle;
-    const shaftEnd = point(
-      mx + Math.cos(angle) * P.shaftLength,
-      my + Math.sin(angle) * P.shaftLength
-    );
-    return {
-      mode,
-      chains: [[point(mx, my), shaftEnd]],
-      spreads: [0],
-      targetLengths: [[P.shaftLength]],
-      crop: {
-        handleOffset: 0,
-        handleOffsetVelocity: 0,
-        flapAngle: P.flapRestAngle,
-        flapAngularVelocity: 0,
-        crackDirection: 1,
-      },
-    };
   }
 
   return {
@@ -293,13 +271,6 @@ function playCrackSound() {
 function triggerCrackAnimation() {
   if (!whip || dropping) return;
   crackPulse = 1;
-  if (whip.mode === 'rigid-crop' && whip.crop) {
-    const direction = whip.crop.crackDirection;
-    whip.crop.crackDirection *= -1;
-    whip.crop.handleOffsetVelocity += P.cropHandleKick * direction;
-    whip.crop.flapAngularVelocity -= P.flapKick * direction;
-    return;
-  }
   const normalAngle = handleAngle + Math.PI / 2;
   for (const chain of allChains()) {
     for (let index = 1; index < chain.length; index++) {
@@ -341,54 +312,17 @@ function updateHandleAim() {
   handleAngle = wrapPi(handleAngle + handleAngVel);
 }
 
-function updateCropKinematics() {
-  if (whip?.mode !== 'rigid-crop' || !whip.crop) return 0;
-  const crop = whip.crop;
-  const shaftAngle = handleAngle + crop.handleOffset;
-  const movementX = mouseX - prevMouseX;
-  const movementY = mouseY - prevMouseY;
-  const perpendicularMovement = -Math.sin(shaftAngle) * movementX + Math.cos(shaftAngle) * movementY;
-
-  crop.handleOffsetVelocity += -crop.handleOffset * P.cropHandleSpring;
-  crop.handleOffsetVelocity *= P.cropHandleDamping;
-  crop.handleOffset = clamp(
-    crop.handleOffset + crop.handleOffsetVelocity,
-    -P.cropHandleMaxAngle,
-    P.cropHandleMaxAngle
-  );
-
-  const flapError = P.flapRestAngle - crop.flapAngle;
-  crop.flapAngularVelocity += flapError * P.flapSpring;
-  crop.flapAngularVelocity -= perpendicularMovement * P.flapInertia;
-  crop.flapAngularVelocity -= crop.handleOffsetVelocity * P.flapHandleCoupling;
-  crop.flapAngularVelocity *= P.flapDamping;
-  crop.flapAngle += crop.flapAngularVelocity;
-  const limitedAngle = clamp(crop.flapAngle, -P.flapMaxAngle, P.flapMaxAngle);
-  if (limitedAngle !== crop.flapAngle) crop.flapAngularVelocity *= -0.18;
-  crop.flapAngle = limitedAngle;
-
-  return Math.max(
-    Math.abs(crop.handleOffsetVelocity) * 18,
-    Math.abs(crop.flapAngularVelocity) * 14
-  );
-}
-
 function applyBasePose(chain, chainIndex) {
   if (dropping || chain.length < 2) return;
   const spread = whip.spreads?.[chainIndex] || 0;
-  const cropOffset = whip.mode === 'rigid-crop' ? whip.crop?.handleOffset || 0 : 0;
-  const targetAngle = handleAngle + spread + cropOffset;
+  const targetAngle = handleAngle + spread;
   const dx = Math.cos(targetAngle);
   const dy = Math.sin(targetAngle);
-  const guided = whip.mode === 'rigid-crop'
-    ? 1
-    : Math.min(P.basePoseSegments, chain.length - 1);
+  const guided = Math.min(P.basePoseSegments, chain.length - 1);
 
   for (let index = 1; index <= guided; index++) {
     const t = (index - 1) / Math.max(guided - 1, 1);
-    const stiffness = whip.mode === 'rigid-crop'
-      ? 0.995
-      : lerp(P.basePoseStiffStart, P.basePoseStiffEnd, t);
+    const stiffness = lerp(P.basePoseStiffStart, P.basePoseStiffEnd, t);
     const previous = chain[index - 1];
     const current = chain[index];
     const targetLength = segmentLength(chainIndex, index - 1);
@@ -399,7 +333,7 @@ function applyBasePose(chain, chainIndex) {
 
 function applyBendLimits(chain, chainIndex) {
   if (chain.length < 3) return;
-  const firstJoint = whip.mode === 'rigid-crop' ? 2 : 1;
+  const firstJoint = 1;
   for (let index = firstJoint; index < chain.length - 1; index++) {
     const a = chain[index - 1];
     const b = chain[index];
@@ -444,7 +378,7 @@ function capSegmentStretch(chain, chainIndex) {
 }
 
 function applyWallCollisions(chain) {
-  if (dropping || whip.mode === 'rigid-crop') return;
+  if (dropping) return;
   for (let index = 1; index < chain.length; index++) {
     const current = chain[index];
     let velocityX = current.x - current.px;
@@ -502,7 +436,6 @@ function update() {
   const mouseMoved = mouseX !== prevMouseX || mouseY !== prevMouseY;
   let maxMotion = 0;
   updateHandleAim();
-  maxMotion = Math.max(maxMotion, updateCropKinematics());
 
   allChains().forEach((chain, chainIndex) => {
     const start = dropping ? 0 : 1;
@@ -673,73 +606,6 @@ function drawFlogger() {
   drawMetalRing(anchor.x + Math.cos(handleAngle) * 6, anchor.y + Math.sin(handleAngle) * 6, 7);
 }
 
-function drawCrop() {
-  const chain = allChains()[0];
-  if (!chain || chain.length !== 2 || !whip.crop) return;
-  const anchor = chain[0];
-  const shaftEnd = chain[1];
-  const shaftAngle = Math.atan2(shaftEnd.y - anchor.y, shaftEnd.x - anchor.x);
-  ctx.save();
-  ctx.lineCap = 'round';
-  ctx.strokeStyle = activeStyle.visual.edge;
-  ctx.lineWidth = 12;
-  ctx.beginPath();
-  ctx.moveTo(anchor.x, anchor.y);
-  ctx.lineTo(shaftEnd.x, shaftEnd.y);
-  ctx.stroke();
-  ctx.strokeStyle = activeStyle.visual.core;
-  ctx.lineWidth = 7;
-  ctx.stroke();
-  ctx.strokeStyle = activeStyle.visual.highlight;
-  ctx.lineWidth = 1.5;
-  const shaftHighlightOffsetX = Math.cos(shaftAngle + Math.PI / 2) * 2.2;
-  const shaftHighlightOffsetY = Math.sin(shaftAngle + Math.PI / 2) * 2.2;
-  ctx.beginPath();
-  ctx.moveTo(anchor.x + shaftHighlightOffsetX, anchor.y + shaftHighlightOffsetY);
-  ctx.lineTo(shaftEnd.x + shaftHighlightOffsetX, shaftEnd.y + shaftHighlightOffsetY);
-  ctx.stroke();
-  ctx.restore();
-
-  ctx.save();
-  ctx.translate(shaftEnd.x, shaftEnd.y);
-  ctx.rotate(shaftAngle);
-  ctx.fillStyle = '#8f949a';
-  ctx.beginPath();
-  ctx.roundRect(-8, -5, 15, 10, 3);
-  ctx.fill();
-  ctx.strokeStyle = '#e2e4e7';
-  ctx.lineWidth = 1.2;
-  ctx.stroke();
-  ctx.restore();
-
-  const flapAngle = shaftAngle + whip.crop.flapAngle;
-  ctx.save();
-  ctx.translate(shaftEnd.x, shaftEnd.y);
-  ctx.rotate(flapAngle);
-  ctx.lineCap = 'round';
-  ctx.strokeStyle = activeStyle.visual.metal;
-  ctx.lineWidth = 5;
-  ctx.beginPath();
-  ctx.moveTo(-7, 0);
-  ctx.lineTo(9, 0);
-  ctx.stroke();
-  ctx.fillStyle = activeStyle.visual.edge;
-  ctx.beginPath();
-  ctx.roundRect(7, -9, P.flapLength - 7, 18, 5);
-  ctx.fill();
-  ctx.fillStyle = activeStyle.visual.core;
-  ctx.beginPath();
-  ctx.roundRect(10, -6, P.flapLength - 13, 12, 4);
-  ctx.fill();
-  ctx.strokeStyle = activeStyle.visual.highlight;
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.roundRect(10, -6, P.flapLength - 13, 12, 4);
-  ctx.stroke();
-  ctx.restore();
-  drawGrip(anchor, shaftAngle, 82, activeStyle.visual.handleWidth);
-}
-
 function drawChain() {
   const chain = allChains()[0];
   if (!chain) return;
@@ -828,7 +694,6 @@ function draw() {
   if (!whip) return;
 
   switch (activeStyle.id) {
-    case 'crop': drawCrop(); break;
     case 'flogger': drawFlogger(); break;
     case 'chain': drawChain(); break;
     case 'cyber': drawCyber(); break;
@@ -841,36 +706,6 @@ let lastFrameAt = 0;
 let idlePhysicsFrames = 0;
 let settleFrames = 0;
 window.__codexWhipMetrics = { renderCosts: [], frameIntervals: [], totalFrames: 0 };
-window.__codexWhipDebug = {
-  getState() {
-    const chain = allChains()[0] || [];
-    const anchor = chain[0];
-    const shaftEnd = chain[1];
-    return {
-      mode: whip?.mode || null,
-      nodeCount: chain.length,
-      anchorX: anchor?.x || 0,
-      anchorY: anchor?.y || 0,
-      shaftEndX: shaftEnd?.x || 0,
-      shaftEndY: shaftEnd?.y || 0,
-      shaftLength: anchor && shaftEnd
-        ? Math.hypot(shaftEnd.x - anchor.x, shaftEnd.y - anchor.y)
-        : 0,
-      targetShaftLength: Number(P.shaftLength) || 0,
-      cropHandleOffset: whip?.crop?.handleOffset || 0,
-      cropFlapAngle: whip?.crop?.flapAngle || 0,
-      cropFlapRestAngle: Number(P.flapRestAngle) || 0,
-      cropFlapMaxAngle: Number(P.flapMaxAngle) || 0,
-    };
-  },
-  triggerCrack() {
-    triggerCrackAnimation();
-    scheduleFrame();
-  },
-  reset(x, y) {
-    resetWhipState(x, y);
-  },
-};
 
 function scheduleFrame() {
   if (animationFrameId !== null) return;

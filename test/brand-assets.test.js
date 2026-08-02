@@ -49,8 +49,8 @@ test('Windows ICO contains all tray and installer sizes', () => {
   assert.deepEqual(sizes, [16, 24, 32, 48, 256]);
 });
 
-test('five original WAV files are valid, distinct and referenced by styles', () => {
-  const names = ['leather.wav', 'crop.wav', 'flogger.wav', 'chain.wav', 'cyber.wav'];
+test('four original WAV files are valid, distinct and referenced by styles', () => {
+  const names = ['leather.wav', 'flogger.wav', 'chain.wav', 'cyber.wav'];
   const referencedNames = getStyleCatalog().flatMap(style => style.soundSources)
     .map(source => path.basename(source));
   assert.deepEqual(referencedNames, names);
@@ -61,5 +61,5 @@ test('five original WAV files are valid, distinct and referenced by styles', () 
     assert.equal(buffer.readUInt32LE(24), 44100);
     return crypto.createHash('sha256').update(buffer).digest('hex');
   });
-  assert.equal(new Set(hashes).size, 5);
+  assert.equal(new Set(hashes).size, 4);
 });

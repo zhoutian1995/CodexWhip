@@ -1,70 +1,50 @@
-# CodexWhip 1.4.1 Test Plan
+# CodexWhip 1.4.3 Test Plan
 
 ## Goal
 
-Prove that a physical left-button press is never silently discarded while keeping the existing Codex task-binding and safe-delivery guarantees. Rapid clicks may be coalesced into one pending whip, but the program must report that state and automatically deliver it after the active send and cooldown complete.
+Remove the short riding crop completely while preserving the remaining four whip styles, task binding, safe Codex delivery, continuous clicking, and Windows packaging behavior.
 
 ## Release Gates
 
-The release is allowed only when every gate below passes on Windows:
-
 1. Source and configuration checks
    - `node --check` passes for production and test JavaScript.
-   - PowerShell parser reports no errors for `scripts/codex-desktop-ui.ps1`.
+   - The PowerShell parser reports no errors for `scripts/codex-desktop-ui.ps1`.
    - `git diff --check` passes.
-   - No credential-like material is staged.
+   - No `crop`, short-riding-crop, or five-style references remain.
 2. Unit and contract tests
    - `npm test` is fully green.
-   - The first whip request runs immediately.
-   - Requests during an active send or cooldown create exactly one pending send.
-   - Repeated rapid clicks do not create an unbounded queue.
-   - The pending send starts automatically after both the active send and cooldown finish.
-   - Scheduler disposal cancels pending work.
-3. Overlay interaction tests
-   - One physical left-button down event produces exactly one IPC request.
-   - The send request does not depend on receiving `mouseup`.
-   - A quick left click followed by right-click close still preserves the left-click request.
-   - Right click and `Esc` still close the overlay.
-   - The overlay remains available after a successful or queued send.
-4. Codex safety regression
-   - Unbound, draft-present, task-mismatch, ambiguous-title, focus-change, permission-mismatch, and unconfirmed-delivery paths send no text or Enter.
-   - Exact task title and runtime ID checks remain in the same guarded UI Automation transaction.
-   - Duplicate phrase text never causes an old message node to be selected.
-   - Codex `config.toml` remains read-only and requires official `Steer` mode.
-5. Visual and performance regression
-   - All five styles render with the production preload and real IPC bridge.
-   - 1080p at 100%, 125%, and 150%, plus 1440p at 200%, produce nonblank captures.
-   - Each style keeps P95 render cost below 33ms and P95 frame interval at or below 34ms.
+   - The public style registry contains only `leather`, `flogger`, `chain`, and `cyber`.
+   - A saved removed style falls back to `leather`.
+   - Existing scheduler, binding, draft protection, and guarded delivery tests remain green.
+3. Overlay interaction and performance
+   - All four styles render through the production preload and IPC bridge.
+   - Single click, rapid clicks, and left-then-right interactions preserve their request counts.
+   - Right click and `Esc` close the overlay.
+   - Each style keeps P95 render cost below 33ms and frame interval at or below 34ms.
    - Static whips stop continuous repainting.
-6. Assets and packaging
-   - Five distinct WAV files and all required icon sizes are present.
+4. Assets and documentation
+   - The style showcase and cover both describe four styles.
+   - Four distinct WAV files are present and referenced; `sounds/crop.wav` is absent.
+   - README and settings documentation do not advertise `crop`.
+5. Packaging and installation
    - `npm audit --omit=dev` reports zero production vulnerabilities.
-   - `npm pack --dry-run --json` includes all runtime files.
-   - `npm run dist:win` creates Setup and Portable executables for version 1.4.1.
-   - Packaged `app.asar` reports version 1.4.1.
-7. Installed application smoke test
-   - Install over `D:\APP\CodexWhip` without changing `binding.json` or `phrases.json`.
-   - Installed application starts and remains resident in the tray.
-   - All five styles load from the installed build.
-   - With the binding temporarily held aside, left click animates and requests a send without transmitting to Codex.
-   - Rapid clicks show queued behavior and produce one deferred send attempt, not silent loss.
-   - Right click and `Esc` hide the overlay while the tray process remains running.
-   - Restore the original binding byte-for-byte after testing.
-8. GitHub publication
-   - Commit is pushed to `origin/main`.
-   - Tag `v1.4.1` points to the pushed commit.
+   - `npm run dist:win` creates Setup and Portable executables for version 1.4.3.
+   - The installed application reports version 1.4.3.
+   - Existing binding and phrase files keep their original hashes.
+   - A previous `crop` setting resolves to the leather whip.
+6. GitHub publication
+   - The commit is pushed to `origin/main`.
+   - Tag `v1.4.3` points to the pushed commit.
    - Setup and Portable assets are uploaded with matching SHA256 digests.
-   - The release is public, non-draft, and marked latest.
 
 ## Execution Record
 
 | Gate | Result | Evidence |
 | --- | --- | --- |
-| Source and configuration | Pass | 21 JavaScript files passed `node --check`; PowerShell parser returned zero errors; `git diff --check` passed. |
-| Unit and contract | Pass | `npm test`: 43 tests passed, including active-send, cooldown, long-send, observer-failure, disposal, and one-slot coalescing cases. |
-| Overlay interaction | Pass | Production preload smoke: single press = 1 IPC, three rapid presses = 3 IPC requests, left-then-right preserved 1 request, right close emitted `hide-overlay`. |
-| Codex safety | Pass | Existing guarded-send tests passed; live probe returned `READY`, a unique task title, matching saved binding, runtime ID present, and no draft. No real Codex message was transmitted during destructive interaction tests. |
-| Visual and performance | Pass | Five styles passed; highest P95 render cost 0.8ms, highest P95 frame interval 33.5ms; all four viewport captures were nonblank; idle repaint delta was 0 frames. |
-| Assets and packaging | Pass | Production audit total 0; npm dry-run contained 44 files; Setup and Portable built; packaged and installed `app.asar` reported 1.4.1. |
-| Installed application | Pass | Over-installed at `D:\APP\CodexWhip`; binding and phrase hashes were unchanged; final three-click log showed queued, coalesced, and one automatic drain; right click and `Esc` hid the overlay while tray processes remained. |
-| GitHub publication | Release-time gate | Verify pushed commit, tag target, public latest release, asset sizes, and GitHub SHA256 digests after publication. |
+| Source and configuration | Pass | JavaScript checks, PowerShell parsing, and `git diff --check` passed. Production source and packaged `app.asar` contain no crop references. |
+| Unit and contract | Pass | `npm test`: 43 tests passed, including removed-style fallback, scheduler, binding, draft protection, and guarded delivery. |
+| Overlay and performance | Pass | Four styles rendered; highest P95 render cost was 0.6ms, highest P95 frame interval was 33.5ms, and idle repaint delta was 0 frames. |
+| Assets and documentation | Pass | Four-style cover and showcase regenerated; four distinct WAV files passed validation; the crop WAV is deleted. |
+| Packaging | Pass | Production audit reported 0 vulnerabilities; npm dry-run contained 43 files; Setup and Portable 1.4.3 built successfully. |
+| Installed application | Pass | `D:\APP\CodexWhip` reports 1.4.3; binding, phrase, and settings hashes were unchanged; the legacy crop setting displayed the leather whip; right click hid the overlay. |
+| GitHub publication | Pending | Push, tag, release, and uploaded asset digests are the final release actions. |
