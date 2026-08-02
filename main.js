@@ -28,6 +28,14 @@ const {
 } = require('./lib/phrase-library');
 const { responseForResult } = require('./lib/whip-response');
 const { ensureCodexSteerMode } = require('./lib/codex-config');
+const {
+  DEFAULT_STYLE_ID,
+  RANDOM_STYLE_ID,
+  WHIP_STYLES,
+  getStyleCatalog,
+  resolveWhipStyle,
+} = require('./lib/whip-styles');
+const { loadSettings, saveSettings } = require('./lib/settings-store');
 
 let tray;
 let overlay;
@@ -41,9 +49,12 @@ let trayStatus = '未绑定任务';
 let phraseLibrary = null;
 let phraseFilePath = '';
 let bindingFilePath = '';
+let settingsFilePath = '';
 let dropHideTimer = null;
 let escapeRegistered = false;
 let steerModeReady = false;
+let selectedWhipStyle = DEFAULT_STYLE_ID;
+let activeWhipStyle = DEFAULT_STYLE_ID;
 
 const SEND_COOLDOWN_MS = 1500;
 const DROP_HIDE_TIMEOUT_MS = 1800;
@@ -117,6 +128,29 @@ function isOverlayVisible() {
   return isOverlayUsable() && overlay.isVisible();
 }
 
+function selectedStyleLabel() {
+  if (selectedWhipStyle === RANDOM_STYLE_ID) return '随机轮换';
+  return WHIP_STYLES[selectedWhipStyle]?.label || WHIP_STYLES[DEFAULT_STYLE_ID].label;
+}
+
+function whipStyleMenuItems() {
+  return [
+    ...getStyleCatalog().map(style => ({
+      label: style.label,
+      type: 'radio',
+      checked: selectedWhipStyle === style.id,
+      click: () => selectWhipStyle(style.id),
+    })),
+    { type: 'separator' },
+    {
+      label: '随机轮换',
+      type: 'radio',
+      checked: selectedWhipStyle === RANDOM_STYLE_ID,
+      click: () => selectWhipStyle(RANDOM_STYLE_ID),
+    },
+  ];
+}
+
 function refreshTrayMenu() {
   if (!tray) return;
 
@@ -129,6 +163,10 @@ function refreshTrayMenu() {
       {
         label: isOverlayVisible() ? '收起鞭子' : '召唤鞭子',
         click: toggleOverlay,
+      },
+      {
+        label: `鞭子款式：${selectedStyleLabel()}`,
+        submenu: whipStyleMenuItems(),
       },
       { label: '绑定当前 Codex 任务', click: bindCurrentSession },
       { label: targetLabel, enabled: false },
@@ -150,6 +188,26 @@ function setTrayStatus(status) {
   trayStatus = status;
   console.log(`codexwhip: status: ${status}`);
   refreshTrayMenu();
+}
+
+function stylePayload({ respawn = false } = {}) {
+  return {
+    styleId: activeWhipStyle,
+    style: WHIP_STYLES[activeWhipStyle],
+    respawn,
+  };
+}
+
+function selectWhipStyle(styleId) {
+  selectedWhipStyle = styleId;
+  activeWhipStyle = resolveWhipStyle(selectedWhipStyle);
+  const saved = saveSettings(settingsFilePath, { whipStyle: selectedWhipStyle });
+  if (isOverlayVisible() && overlayReady) {
+    overlay.webContents.send('refresh-whip', stylePayload({ respawn: true }));
+  }
+  setTrayStatus(saved.ok
+    ? `已切换：${WHIP_STYLES[activeWhipStyle].label}`
+    : `款式已切换，但保存失败：${WHIP_STYLES[activeWhipStyle].label}`);
 }
 
 function sessionFromProbe(result) {
@@ -266,6 +324,8 @@ function createOverlay() {
     fullscreenable: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      sandbox: true,
     },
   });
   overlay.setAlwaysOnTop(true, 'screen-saver');
@@ -274,7 +334,7 @@ function createOverlay() {
     overlayReady = true;
     if (spawnQueued && isOverlayVisible()) {
       spawnQueued = false;
-      overlay.webContents.send('spawn-whip');
+      overlay.webContents.send('spawn-whip', stylePayload());
     }
   });
   overlay.on('show', refreshTrayMenu);
@@ -341,10 +401,11 @@ function revealOverlay() {
   if (!isOverlayUsable()) createOverlay();
   if (!isOverlayUsable()) return;
 
+  activeWhipStyle = resolveWhipStyle(selectedWhipStyle);
   overlay.show();
   registerEscapeShortcut();
   if (overlayReady) {
-    overlay.webContents.send('spawn-whip');
+    overlay.webContents.send('spawn-whip', stylePayload());
   } else {
     spawnQueued = true;
   }
@@ -366,7 +427,7 @@ function restoreOverlayAfterDesktopSend() {
     overlay.showInactive();
     setTimeout(() => {
       if (isOverlayVisible() && overlayReady) {
-        overlay.webContents.send('refresh-whip');
+        overlay.webContents.send('refresh-whip', stylePayload());
       }
     }, 80);
   }
@@ -454,6 +515,10 @@ if (!hasSingleInstanceLock) {
     const storageDir = path.join(app.getPath('appData'), 'codexwhip');
     phraseFilePath = path.join(storageDir, 'phrases.json');
     bindingFilePath = path.join(storageDir, 'binding.json');
+    settingsFilePath = path.join(storageDir, 'settings.json');
+    const settingsResult = loadSettings(settingsFilePath);
+    selectedWhipStyle = settingsResult.settings.whipStyle;
+    activeWhipStyle = resolveWhipStyle(selectedWhipStyle);
     const phraseResult = initializePhraseLibrary();
 
     tray = new Tray(getTrayIcon());
@@ -466,6 +531,9 @@ if (!hasSingleInstanceLock) {
     }
     if (!phraseResult.ok) {
       setTrayStatus(`词库无效，继续使用默认中文词库：${phraseResult.message}`);
+    }
+    if (!settingsResult.ok) {
+      setTrayStatus('款式设置无效，已恢复黑红长皮鞭');
     }
 
     revealOverlay();

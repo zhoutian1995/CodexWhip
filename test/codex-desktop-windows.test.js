@@ -152,7 +152,12 @@ test('overlay stays visible after left click and supports three close controls',
   assert.match(overlay, /let leftWhipPending\s*=\s*false/u);
   assert.match(overlay, /function scheduleFrame\(\)/u);
   assert.match(overlay, /function getWhipBounds\(\)/u);
-  assert.match(overlay, /WHIP_CRACK_AUDIO/u);
+  assert.match(overlay, /AUDIO_BY_STYLE/u);
+  assert.match(overlay, /mode === 'multi-tail'/u);
+  assert.match(overlay, /mode === 'rigid-crop'/u);
+  assert.match(overlay, /function drawChain\(\)/u);
+  assert.match(overlay, /function drawCyber\(\)/u);
+  assert.match(overlay, /Math\.min\(6,/u);
   assert.doesNotMatch(overlay, /clearRect\(0,\s*0,\s*W,\s*H\)[\s\S]{0,160}requestAnimationFrame\(loop\)/u);
   assert.doesNotMatch(overlay, /^loop\(\);/mu);
   assert.match(overlay, /event\.button\s*===\s*2[\s\S]*?startDropping\(\)/u);
@@ -169,7 +174,10 @@ test('overlay stays visible after left click and supports three close controls',
   assert.match(main, /setIgnoreMouseEvents\(true\)/u);
   assert.match(main, /setAlwaysOnTop\(false\)/u);
   assert.match(main, /setIgnoreMouseEvents\(false\)/u);
-  assert.match(main, /webContents\.send\('refresh-whip'\)/u);
+  assert.match(main, /webContents\.send\('refresh-whip', stylePayload/u);
+  assert.match(main, /label: `鞭子款式：\$\{selectedStyleLabel\(\)\}`/u);
+  assert.match(main, /settings\.json/u);
+  assert.match(main, /resolveWhipStyle\(selectedWhipStyle\)/u);
   assert.match(main, /if \(!boundSession\) \{\s*await restoreSavedSession\(\);/u);
   assert.match(main, /globalShortcut\.register\('Escape', requestOverlayDrop\)/u);
   assert.match(main, /tray\.on\('click', toggleOverlay\)/u);

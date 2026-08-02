@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html>
 <head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; media-src 'self'; img-src 'self' data:">
 <style>
   * { margin: 0; padding: 0; cursor: none; }
   html, body { overflow: hidden; background: transparent; width: 100%; height: 100%; }
@@ -11,62 +13,101 @@
 <canvas id="c"></canvas>
 <script>
 
-// ══════════════════════════════════════════════════════════════════════════════
-//  PHYSICS SETTINGS — TWEAK EVERYTHING HERE
-// ══════════════════════════════════════════════════════════════════════════════
-const P = {
-  // Rope structure
-  segments:       24,     // number of chain links
-  segmentLength:  25,     // base length of each link (px)
-  taper:          0.6,   // tip segment is this fraction of base length
+const BASE_PHYSICS = Object.freeze({
+  segments: 24,
+  segmentLength: 25,
+  taper: 0.6,
+  gravity: 1.2,
+  dropGravity: 0.95,
+  damping: 0.96,
+  constraintIters: 6,
+  maxStretchRatio: 1.2,
+  baseTargetAngle: -1.12,
+  handleAimByMouseX: 0.4,
+  handleAimByMouseY: 0.2,
+  handleAimClamp: 2,
+  handleSpring: 0.7,
+  handleAngularDamping: 0.078,
+  basePoseSegments: 2,
+  basePoseStiffStart: 0.9,
+  basePoseStiffEnd: 0.8,
+  handleMaxBendDeg: 16,
+  tipMaxBendDeg: 130,
+  bendRigidityStart: 0.8,
+  bendRigidityEnd: 0.12,
+  wallBounce: 0.42,
+  wallFriction: 0.86,
+  bgAlpha: 0.011,
+  arcWidth: 260,
+  arcHeight: 185,
+});
 
-  // Physics
-  gravity:        1.2,   // normal gravity
-  dropGravity:    0.95,    // gravity when dropping/despawning
-  damping:        0.96,  // velocity retention per frame (1 = no loss)
-  constraintIters:6,      // enough stiffness without burning a full CPU core
-  maxStretchRatio: 1.2,  // hard cap for per-link stretch during fast whips
-
-  // Dynamic handle aim (target angle + restoring spring, not static lock)
-  baseTargetAngle: -1.12, // radians, default "up-right" resting direction
-  handleAimByMouseX: 0.4, // horizontal mouse movement influence on target angle
-  handleAimByMouseY: 0.2, // vertical mouse movement influence on target angle
-  handleAimClamp:    2.0,  // max radians target can deviate from base angle
-  handleSpring:      0.7,  // restoring force to target angle
-  handleAngularDamping: 0.078, // angular velocity damping
-  basePoseSegments: 2,    // how many early segments are strongly guided
-  basePoseStiffStart: 0.9, // stiffness near handle
-  basePoseStiffEnd:   0.8, // stiffness near end of guided region
-
-  // Elastic bend limits by chain position (handle stiff, tip floppy)
-  handleMaxBendDeg: 16,   // max angle between links near handle
-  tipMaxBendDeg:   130,   // max angle between links near tip
-  bendRigidityStart: 0.8, // correction strength near handle
-  bendRigidityEnd:   0.12, // correction strength near tip
-
-  // Screen-edge slap
-  wallBounce:      0.42,   // velocity retained after wall hit
-  wallFriction:    0.86,   // tangential damping on wall hit
-
-  // Visuals
-  lineWidthHandle: 7,      // rope thickness near handle
-  lineWidthTip:    5,      // rope thickness near tip
-  outlineWidth:   3,      // white halo on each side of the stroke (approx px)
-  handleExtraWidth: 5,    // added core + outline thickness on first handleThickSegments links only
-  handleThickSegments: 2, // how many links from the handle get handleExtraWidth
-  bgAlpha:        0.011,  // barely-visible bg so window captures mouse events
-
-  // Initial arc shape
-  arcWidth:       260,    // how far right the arc extends from mouse
-  arcHeight:      185,    // how high the arc goes above mouse
+const FALLBACK_STYLE = {
+  id: 'leather',
+  label: '黑红长皮鞭',
+  physicsMode: 'rope',
+  soundSources: ['sounds/leather.wav'],
+  physics: {},
+  visual: {
+    core: '#08090b', edge: '#31060d', highlight: '#b2182b', metal: '#c9cdd2',
+    handleWidth: 16, tipWidth: 4, glow: 0,
+  },
 };
-
-// ══════════════════════════════════════════════════════════════════════════════
+const STYLE_BY_ID = new Map([[FALLBACK_STYLE.id, FALLBACK_STYLE]]);
 
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d', { alpha: true });
-let W, H;
+let W = 0;
+let H = 0;
 let previousDrawBounds = null;
+let activeStyle = FALLBACK_STYLE;
+let P = { ...BASE_PHYSICS, ...activeStyle.physics };
+let whip = null;
+let mouseX = 0;
+let mouseY = 0;
+let prevMouseX = 0;
+let prevMouseY = 0;
+let dropping = false;
+let closing = false;
+let handleAngle = P.baseTargetAngle;
+let handleAngVel = 0;
+let crackPulse = 0;
+let lastWhipRequestAt = 0;
+let lastCrackResult = { status: 'idle' };
+let leftWhipPending = false;
+
+const LOCAL_SEND_COOLDOWN_MS = 1500;
+const MOTION_EPSILON = 0.12;
+const MAX_IDLE_PHYSICS_FRAMES = 90;
+const SETTLE_FRAMES = 4;
+const TARGET_FRAME_INTERVAL_MS = 1000 / 30;
+const SOUND_PROFILES = Object.freeze({
+  leather: { rate: 0.94, volume: 1 },
+  crop: { rate: 1.16, volume: 0.92 },
+  flogger: { rate: 0.84, volume: 1 },
+  chain: { rate: 0.9, volume: 1 },
+  cyber: { rate: 1.06, volume: 0.95 },
+});
+const AUDIO_BY_STYLE = new Map();
+
+function ensureStyleAudio(style) {
+  if (AUDIO_BY_STYLE.has(style.id)) return;
+  const audioItems = (style.soundSources || []).map(src => {
+    const audio = new Audio(src);
+    audio.preload = 'auto';
+    audio.load();
+    return audio;
+  });
+  AUDIO_BY_STYLE.set(style.id, audioItems);
+}
+
+const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
+const lerp = (a, b, t) => a + (b - a) * t;
+const wrapPi = angle => {
+  while (angle > Math.PI) angle -= Math.PI * 2;
+  while (angle < -Math.PI) angle += Math.PI * 2;
+  return angle;
+};
 
 function fillHitSurface(x, y, width, height) {
   ctx.fillStyle = `rgba(0,0,0,${P.bgAlpha})`;
@@ -79,104 +120,90 @@ function resize() {
   previousDrawBounds = null;
   fillHitSurface(0, 0, W, H);
 }
-resize();
-window.addEventListener('resize', () => {
-  resize();
-  scheduleFrame();
-});
 
-let mouseX = 0, mouseY = 0;
-let prevMouseX = 0, prevMouseY = 0;
-let whip = null;
-let dropping = false;
-let closing = false;
-let handleAngle = P.baseTargetAngle;
-let handleAngVel = 0;
-let crackPulse = 0;
-let lastWhipRequestAt = 0;
-let lastCrackResult = { status: 'idle' };
-let leftWhipPending = false;
-
-const WHIP_CRACK_SOUNDS = ['sounds/A.mp3', 'sounds/B.mp3', 'sounds/C.mp3', 'sounds/D.mp3', 'sounds/E.mp3'];
-const WHIP_CRACK_AUDIO = WHIP_CRACK_SOUNDS.map(src => {
-  const audio = new Audio(src);
-  audio.preload = 'auto';
-  audio.load();
-  return audio;
-});
-const LOCAL_SEND_COOLDOWN_MS = 1500;
-const MOTION_EPSILON = 0.12;
-const MAX_IDLE_PHYSICS_FRAMES = 90;
-const SETTLE_FRAMES = 4;
-const TARGET_FRAME_INTERVAL_MS = 1000 / 30;
-
-document.addEventListener('mousemove', e => {
-  mouseX = e.clientX;
-  mouseY = e.clientY;
-  if (!whip && !dropping && !closing) resetWhipState(mouseX, mouseY);
-  scheduleFrame();
-}, { passive: true });
-document.addEventListener('mousedown', event => {
-  if (!whip && !dropping && !closing) {
-    resetWhipState(event.clientX, event.clientY);
-  }
-  if (!whip || dropping || closing) return;
-  if (event.button === 2) {
-    leftWhipPending = false;
-    startDropping();
-    return;
-  }
-  if (event.button !== 0) return;
-
-  triggerCrackAnimation();
-  scheduleFrame();
-  const now = Date.now();
-  if (now - lastWhipRequestAt < LOCAL_SEND_COOLDOWN_MS) {
-    leftWhipPending = false;
-    return;
-  }
-  leftWhipPending = true;
-  playCrackSound();
-});
-
-document.addEventListener('mouseup', event => {
-  if (event.button !== 0 || !leftWhipPending) return;
-  leftWhipPending = false;
-  lastWhipRequestAt = Date.now();
-  setTimeout(() => {
-    if (!whip || dropping) return;
-  window.bridge.whipCrack()
-    .then(result => {
-      lastCrackResult = result || { status: 'failed', code: 'EMPTY_RESPONSE' };
-      document.body.dataset.whipStatus = lastCrackResult.status;
-    })
-    .catch(() => {
-      lastCrackResult = { status: 'failed', code: 'IPC_FAILED' };
-      document.body.dataset.whipStatus = lastCrackResult.status;
-    });
-  }, 500);
-});
-document.addEventListener('contextmenu', event => event.preventDefault());
-
-// ── Whip creation ───────────────────────────────────────────────────────────
-function spawnWhip(mx, my) {
-  dropping = false;
-  const pts = [];
-  for (let i = 0; i < P.segments; i++) {
-    const t = i / (P.segments - 1);
-    // Nice upward arc from handle (mouse) to tip
-    const x = mx + t * P.arcWidth;
-    const y = my - Math.sin(t * Math.PI * 0.75) * P.arcHeight;
-    pts.push({ x, y, px: x, py: y });
-  }
-  return pts;
+function setActiveStyle(styleId, styleConfig) {
+  if (styleConfig?.id === styleId) STYLE_BY_ID.set(styleId, styleConfig);
+  activeStyle = STYLE_BY_ID.get(styleId) || FALLBACK_STYLE;
+  ensureStyleAudio(activeStyle);
+  P = { ...BASE_PHYSICS, ...activeStyle.physics };
+  handleAngle = P.baseTargetAngle;
+  handleAngVel = 0;
+  document.body.dataset.whipStyle = activeStyle.id;
 }
 
-function refreshWhipSurface() {
-  ctx.clearRect(0, 0, W, H);
-  fillHitSurface(0, 0, W, H);
-  previousDrawBounds = null;
-  scheduleFrame();
+function point(x, y) {
+  return { x, y, px: x, py: y };
+}
+
+function createArcChain(count, mx, my, arcWidth, arcHeight, phase = 0) {
+  const points = [];
+  for (let index = 0; index < count; index++) {
+    const t = index / Math.max(1, count - 1);
+    const x = mx + t * arcWidth;
+    const wave = Math.sin(t * Math.PI * 0.75 + phase) - Math.sin(phase) * (1 - t);
+    const y = my - wave * arcHeight;
+    points.push(point(x, y));
+  }
+  return points;
+}
+
+function spawnWhip(mx, my) {
+  const mode = activeStyle.physicsMode;
+  if (mode === 'multi-tail') {
+    const tailCount = clamp(Number(P.tails) || 7, 2, 7);
+    const chains = [];
+    const spreads = [];
+    for (let index = 0; index < tailCount; index++) {
+      const spread = lerp(-0.34, 0.34, index / Math.max(1, tailCount - 1));
+      chains.push(createArcChain(
+        P.segments,
+        mx,
+        my,
+        P.arcWidth * (1 - Math.abs(spread) * 0.18),
+        P.arcHeight + spread * 72,
+        spread * 0.6
+      ));
+      spreads.push(spread);
+    }
+    return { mode, chains, spreads };
+  }
+
+  if (mode === 'rigid-crop') {
+    const angle = P.baseTargetAngle;
+    const shaftEnd = point(
+      mx + Math.cos(angle) * P.shaftLength,
+      my + Math.sin(angle) * P.shaftLength
+    );
+    const chain = [point(mx, my), shaftEnd];
+    const lashSegments = 4;
+    for (let index = 1; index <= lashSegments; index++) {
+      const t = index / lashSegments;
+      chain.push(point(
+        shaftEnd.x + Math.cos(angle + 0.16 * t) * P.lashLength * t,
+        shaftEnd.y + Math.sin(angle + 0.16 * t) * P.lashLength * t
+      ));
+    }
+    return {
+      mode,
+      chains: [chain],
+      spreads: [0],
+      targetLengths: [[P.shaftLength, ...Array(lashSegments).fill(P.lashLength / lashSegments)]],
+    };
+  }
+
+  return {
+    mode,
+    chains: [createArcChain(P.segments, mx, my, P.arcWidth, P.arcHeight)],
+    spreads: [0],
+  };
+}
+
+function allChains() {
+  return whip?.chains || [];
+}
+
+function allPoints() {
+  return allChains().flat();
 }
 
 function resetWhipState(mx, my) {
@@ -201,43 +228,43 @@ function resetWhipState(mx, my) {
   refreshWhipSurface();
 }
 
-function segLen(i) {
-  const t = i / (P.segments - 1);
+function refreshWhipSurface() {
+  ctx.clearRect(0, 0, W, H);
+  fillHitSurface(0, 0, W, H);
+  previousDrawBounds = null;
+  scheduleFrame();
+}
+
+function segmentLength(chainIndex, segmentIndex) {
+  const explicit = whip?.targetLengths?.[chainIndex]?.[segmentIndex];
+  if (Number.isFinite(explicit)) return explicit;
+  const chain = allChains()[chainIndex];
+  const t = segmentIndex / Math.max(1, chain.length - 2);
   return P.segmentLength * (1 - t * (1 - P.taper));
 }
 
-const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-const lerp = (a, b, t) => a + (b - a) * t;
-
-/** Point on Catmull–Rom spline (extrapolated ends) for index i in `pts`. */
-function catmullPoint(pts, i) {
-  const n = pts.length;
-  if (n === 0) return { x: 0, y: 0 };
-  if (i < 0) {
-    if (n >= 2) {
-      return { x: 2 * pts[0].x - pts[1].x, y: 2 * pts[0].y - pts[1].y };
-    }
-    return { x: pts[0].x, y: pts[0].y };
+function catmullPoint(points, index) {
+  const count = points.length;
+  if (!count) return { x: 0, y: 0 };
+  if (index < 0) {
+    return count >= 2
+      ? { x: 2 * points[0].x - points[1].x, y: 2 * points[0].y - points[1].y }
+      : points[0];
   }
-  if (i >= n) {
-    if (n >= 2) {
-      const a = pts[n - 2], b = pts[n - 1];
-      return { x: 2 * b.x - a.x, y: 2 * b.y - a.y };
-    }
-    return { x: pts[n - 1].x, y: pts[n - 1].y };
+  if (index >= count) {
+    if (count < 2) return points[count - 1];
+    const before = points[count - 2];
+    const last = points[count - 1];
+    return { x: 2 * last.x - before.x, y: 2 * last.y - before.y };
   }
-  return pts[i];
+  return points[index];
 }
 
-/**
- * Cubic Bézier from p1→p2 matching uniform Catmull–Rom through p0,p1,p2,p3.
- * Control points: C1 = p1 + (p2-p0)/6, C2 = p2 - (p3-p1)/6.
- */
-function whipSegmentBezier(pts, i) {
-  const p0 = catmullPoint(pts, i - 1);
-  const p1 = pts[i];
-  const p2 = pts[i + 1];
-  const p3 = catmullPoint(pts, i + 2);
+function segmentBezier(points, index) {
+  const p0 = catmullPoint(points, index - 1);
+  const p1 = points[index];
+  const p2 = points[index + 1];
+  const p3 = catmullPoint(points, index + 2);
   return {
     cp1x: p1.x + (p2.x - p0.x) / 6,
     cp1y: p1.y + (p2.y - p0.y) / 6,
@@ -247,16 +274,25 @@ function whipSegmentBezier(pts, i) {
     y2: p2.y,
   };
 }
-const wrapPi = a => {
-  while (a > Math.PI) a -= Math.PI * 2;
-  while (a < -Math.PI) a += Math.PI * 2;
-  return a;
-};
+
+function splinePath(points, startIndex = 0) {
+  if (points.length < 2) return;
+  ctx.beginPath();
+  ctx.moveTo(points[startIndex].x, points[startIndex].y);
+  for (let index = startIndex; index < points.length - 1; index++) {
+    const curve = segmentBezier(points, index);
+    ctx.bezierCurveTo(curve.cp1x, curve.cp1y, curve.cp2x, curve.cp2y, curve.x2, curve.y2);
+  }
+}
 
 function playCrackSound() {
-  if (!WHIP_CRACK_AUDIO.length) return;
-  const audio = WHIP_CRACK_AUDIO[Math.floor(Math.random() * WHIP_CRACK_AUDIO.length)];
+  const items = AUDIO_BY_STYLE.get(activeStyle.id) || [];
+  if (!items.length) return;
+  const audio = items[Math.floor(Math.random() * items.length)];
+  const profile = SOUND_PROFILES[activeStyle.id] || { rate: 1, volume: 1 };
   audio.currentTime = 0;
+  audio.playbackRate = profile.rate;
+  audio.volume = profile.volume;
   audio.play().catch(() => {});
 }
 
@@ -264,12 +300,14 @@ function triggerCrackAnimation() {
   if (!whip || dropping) return;
   crackPulse = 1;
   const normalAngle = handleAngle + Math.PI / 2;
-  for (let i = 1; i < whip.length; i++) {
-    const t = i / (whip.length - 1);
-    const kick = 4 + 24 * t * t;
-    const p = whip[i];
-    p.px = p.x - Math.cos(normalAngle) * kick;
-    p.py = p.y - Math.sin(normalAngle) * kick;
+  for (const chain of allChains()) {
+    for (let index = 1; index < chain.length; index++) {
+      const t = index / Math.max(1, chain.length - 1);
+      const modeBoost = whip.mode === 'rigid-crop' ? 1.35 : whip.mode === 'chain' ? 0.82 : 1;
+      const kick = (4 + 25 * t * t) * modeBoost;
+      chain[index].px = chain[index].x - Math.cos(normalAngle) * kick;
+      chain[index].py = chain[index].y - Math.sin(normalAngle) * kick;
+    }
   }
 }
 
@@ -288,198 +326,185 @@ function startDropping() {
 
 function updateHandleAim() {
   if (dropping) return;
-  const mvx = mouseX - prevMouseX;
-  const mvy = mouseY - prevMouseY;
+  const movementX = mouseX - prevMouseX;
+  const movementY = mouseY - prevMouseY;
   const delta = clamp(
-    mvx * P.handleAimByMouseX + mvy * P.handleAimByMouseY,
+    movementX * P.handleAimByMouseX + movementY * P.handleAimByMouseY,
     -P.handleAimClamp,
     P.handleAimClamp
   );
   const target = P.baseTargetAngle + delta;
-  const err = wrapPi(target - handleAngle);
-  handleAngVel += err * P.handleSpring;
+  const error = wrapPi(target - handleAngle);
+  handleAngVel += error * P.handleSpring;
   handleAngVel *= P.handleAngularDamping;
   handleAngle = wrapPi(handleAngle + handleAngVel);
 }
 
-function applyBasePose() {
-  if (!whip || dropping) return;
-  const dx = Math.cos(handleAngle);
-  const dy = Math.sin(handleAngle);
-  const guided = Math.min(P.basePoseSegments, whip.length - 1);
-  for (let i = 1; i <= guided; i++) {
-    const t = (i - 1) / Math.max(guided - 1, 1);
-    const stiff = lerp(P.basePoseStiffStart, P.basePoseStiffEnd, t);
-    const prev = whip[i - 1];
-    const p = whip[i];
-    const targetLen = segLen(i - 1);
-    const tx = prev.x + dx * targetLen;
-    const ty = prev.y + dy * targetLen;
-    p.x = lerp(p.x, tx, stiff);
-    p.y = lerp(p.y, ty, stiff);
+function applyBasePose(chain, chainIndex) {
+  if (dropping || chain.length < 2) return;
+  const spread = whip.spreads?.[chainIndex] || 0;
+  const targetAngle = handleAngle + spread;
+  const dx = Math.cos(targetAngle);
+  const dy = Math.sin(targetAngle);
+  const guided = whip.mode === 'rigid-crop'
+    ? 1
+    : Math.min(P.basePoseSegments, chain.length - 1);
+
+  for (let index = 1; index <= guided; index++) {
+    const t = (index - 1) / Math.max(guided - 1, 1);
+    const stiffness = whip.mode === 'rigid-crop'
+      ? 0.995
+      : lerp(P.basePoseStiffStart, P.basePoseStiffEnd, t);
+    const previous = chain[index - 1];
+    const current = chain[index];
+    const targetLength = segmentLength(chainIndex, index - 1);
+    current.x = lerp(current.x, previous.x + dx * targetLength, stiffness);
+    current.y = lerp(current.y, previous.y + dy * targetLength, stiffness);
   }
 }
 
-function applyBendLimits() {
-  if (!whip || whip.length < 3) return;
-  for (let i = 1; i < whip.length - 1; i++) {
-    const a = whip[i - 1];
-    const b = whip[i];
-    const c = whip[i + 1];
-
+function applyBendLimits(chain, chainIndex) {
+  if (chain.length < 3) return;
+  const firstJoint = whip.mode === 'rigid-crop' ? 2 : 1;
+  for (let index = firstJoint; index < chain.length - 1; index++) {
+    const a = chain[index - 1];
+    const b = chain[index];
+    const c = chain[index + 1];
     const v1x = a.x - b.x;
     const v1y = a.y - b.y;
     const v2x = c.x - b.x;
     const v2y = c.y - b.y;
     const l1 = Math.hypot(v1x, v1y) || 0.0001;
     const l2 = Math.hypot(v2x, v2y) || 0.0001;
-    const n1x = v1x / l1, n1y = v1y / l1;
-    const n2x = v2x / l2, n2y = v2y / l2;
-
-    const dot = clamp(n1x * n2x + n1y * n2y, -1, 1);
-    const angle = Math.acos(dot);
-    const t = i / (whip.length - 2);
+    const n1x = v1x / l1;
+    const n1y = v1y / l1;
+    const n2x = v2x / l2;
+    const n2y = v2y / l2;
+    const angle = Math.acos(clamp(n1x * n2x + n1y * n2y, -1, 1));
+    const t = index / Math.max(1, chain.length - 2);
     const maxBend = lerp(P.handleMaxBendDeg, P.tipMaxBendDeg, t) * Math.PI / 180;
-    const bend = Math.PI - angle; // bend away from a straight line
+    const bend = Math.PI - angle;
     if (bend <= maxBend) continue;
-
-    // Clamp to max bend while preserving side/sign of the bend.
     const cross = n1x * n2y - n1y * n2x;
     const sign = cross >= 0 ? 1 : -1;
-    const targetAngle = Math.PI - maxBend;
-    const targetA = Math.atan2(n1y, n1x) + sign * targetAngle;
-    const tx = b.x + Math.cos(targetA) * l2;
-    const ty = b.y + Math.sin(targetA) * l2;
+    const targetAngle = Math.atan2(n1y, n1x) + sign * (Math.PI - maxBend);
     const rigidity = lerp(P.bendRigidityStart, P.bendRigidityEnd, t);
-
-    c.x = lerp(c.x, tx, rigidity);
-    c.y = lerp(c.y, ty, rigidity);
+    c.x = lerp(c.x, b.x + Math.cos(targetAngle) * l2, rigidity);
+    c.y = lerp(c.y, b.y + Math.sin(targetAngle) * l2, rigidity);
   }
 }
 
-function capSegmentStretch() {
-  if (!whip || whip.length < 2) return;
-  for (let i = 0; i < whip.length - 1; i++) {
-    const a = whip[i];
-    const b = whip[i + 1];
+function capSegmentStretch(chain, chainIndex) {
+  for (let index = 0; index < chain.length - 1; index++) {
+    const a = chain[index];
+    const b = chain[index + 1];
     const dx = b.x - a.x;
     const dy = b.y - a.y;
-    const dist = Math.hypot(dx, dy) || 0.0001;
-    const maxLen = segLen(i) * P.maxStretchRatio;
-    if (dist <= maxLen) continue;
-    const k = maxLen / dist;
-    b.x = a.x + dx * k;
-    b.y = a.y + dy * k;
+    const distance = Math.hypot(dx, dy) || 0.0001;
+    const maxLength = segmentLength(chainIndex, index) * P.maxStretchRatio;
+    if (distance <= maxLength) continue;
+    const ratio = maxLength / distance;
+    b.x = a.x + dx * ratio;
+    b.y = a.y + dy * ratio;
   }
 }
 
-function applyWallCollisions() {
-  if (!whip || dropping) return; // disable collisions while dropping
-  const start = 1; // keep pinned handle untouched
-  for (let i = start; i < whip.length; i++) {
-    const p = whip[i];
-    let vx = p.x - p.px;
-    let vy = p.y - p.py;
+function applyWallCollisions(chain) {
+  if (dropping) return;
+  for (let index = 1; index < chain.length; index++) {
+    const current = chain[index];
+    let velocityX = current.x - current.px;
+    let velocityY = current.y - current.py;
     let hit = false;
 
-    if (p.x < 0) {
-      p.x = 0;
-      if (vx < 0) vx = -vx * P.wallBounce;
-      vy *= P.wallFriction;
-      hit = true;
-    } else if (p.x > W) {
-      p.x = W;
-      if (vx > 0) vx = -vx * P.wallBounce;
-      vy *= P.wallFriction;
+    if (current.x < 0 || current.x > W) {
+      current.x = clamp(current.x, 0, W);
+      velocityX = -velocityX * P.wallBounce;
+      velocityY *= P.wallFriction;
       hit = true;
     }
-
-    if (p.y < 0) {
-      p.y = 0;
-      if (vy < 0) vy = -vy * P.wallBounce;
-      vx *= P.wallFriction;
-      hit = true;
-    } else if (p.y > H) {
-      p.y = H;
-      if (vy > 0) vy = -vy * P.wallBounce;
-      vx *= P.wallFriction;
+    if (current.y < 0 || current.y > H) {
+      current.y = clamp(current.y, 0, H);
+      velocityY = -velocityY * P.wallBounce;
+      velocityX *= P.wallFriction;
       hit = true;
     }
-
     if (hit) {
-      p.px = p.x - vx;
-      p.py = p.y - vy;
+      current.px = current.x - velocityX;
+      current.py = current.y - velocityY;
     }
   }
 }
 
-// ── Physics step ────────────────────────────────────────────────────────────
+function constrainChain(chain, chainIndex) {
+  for (let index = 0; index < chain.length - 1; index++) {
+    const a = chain[index];
+    const b = chain[index + 1];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const distance = Math.hypot(dx, dy) || 0.0001;
+    const target = segmentLength(chainIndex, index);
+    const difference = (distance - target) / distance * 0.5;
+    const offsetX = dx * difference;
+    const offsetY = dy * difference;
+    if (index === 0 && !dropping) {
+      b.x -= offsetX * 2;
+      b.y -= offsetY * 2;
+    } else {
+      a.x += offsetX;
+      a.y += offsetY;
+      b.x -= offsetX;
+      b.y -= offsetY;
+    }
+  }
+}
+
 function update() {
   if (!whip) return { maxMotion: 0, mouseMoved: false };
-
   crackPulse *= 0.82;
   if (crackPulse < 0.01) crackPulse = 0;
 
-  const g = dropping ? P.dropGravity : P.gravity;
+  const gravity = dropping ? P.dropGravity : P.gravity;
   const mouseMoved = mouseX !== prevMouseX || mouseY !== prevMouseY;
   let maxMotion = 0;
   updateHandleAim();
 
-  // Verlet integration
-  const start = dropping ? 0 : 1; // if dropping, handle is free too
-  for (let i = start; i < whip.length; i++) {
-    const p = whip[i];
-    const vx = (p.x - p.px) * P.damping;
-    const vy = (p.y - p.py) * P.damping;
-    maxMotion = Math.max(maxMotion, Math.abs(vx) + Math.abs(vy));
-    p.px = p.x;
-    p.py = p.y;
-    p.x += vx;
-    p.y += vy + g;
-  }
-
-  // Pin handle to mouse
-  if (!dropping) {
-    whip[0].x = mouseX;
-    whip[0].y = mouseY;
-    whip[0].px = mouseX;
-    whip[0].py = mouseY;
-  }
-
-  // Prevent rubber-band stretching spikes before constraints.
-  capSegmentStretch();
-  applyWallCollisions();
-
-  // Keep early whip segments posed upward from handle.
-  applyBasePose();
-
-  // Distance constraints (multiple iterations for stiffness)
-  for (let iter = 0; iter < P.constraintIters; iter++) {
-    for (let i = 0; i < whip.length - 1; i++) {
-      const a = whip[i], b = whip[i + 1];
-      const dx = b.x - a.x, dy = b.y - a.y;
-      const dist = Math.sqrt(dx * dx + dy * dy) || 0.0001;
-      const target = segLen(i);
-      const diff = (dist - target) / dist * 0.5;
-      const ox = dx * diff, oy = dy * diff;
-      if (i === 0 && !dropping) {
-        // Handle is pinned – push only the next point
-        b.x -= ox * 2;
-        b.y -= oy * 2;
-      } else {
-        a.x += ox; a.y += oy;
-        b.x -= ox; b.y -= oy;
-      }
+  allChains().forEach((chain, chainIndex) => {
+    const start = dropping ? 0 : 1;
+    for (let index = start; index < chain.length; index++) {
+      const current = chain[index];
+      const velocityX = (current.x - current.px) * P.damping;
+      const velocityY = (current.y - current.py) * P.damping;
+      maxMotion = Math.max(maxMotion, Math.abs(velocityX) + Math.abs(velocityY));
+      current.px = current.x;
+      current.py = current.y;
+      current.x += velocityX;
+      current.y += velocityY + gravity;
     }
-    // Clamp bend angle per joint; near handle = stiffer, near tip = floppier.
-    applyBendLimits();
-    if (!dropping) applyBasePose();
-    capSegmentStretch();
-    applyWallCollisions();
+
+    if (!dropping) {
+      chain[0].x = mouseX;
+      chain[0].y = mouseY;
+      chain[0].px = mouseX;
+      chain[0].py = mouseY;
+    }
+
+    capSegmentStretch(chain, chainIndex);
+    applyWallCollisions(chain);
+    applyBasePose(chain, chainIndex);
+  });
+
+  for (let iteration = 0; iteration < P.constraintIters; iteration++) {
+    allChains().forEach((chain, chainIndex) => {
+      constrainChain(chain, chainIndex);
+      applyBendLimits(chain, chainIndex);
+      if (!dropping) applyBasePose(chain, chainIndex);
+      capSegmentStretch(chain, chainIndex);
+      applyWallCollisions(chain);
+    });
   }
 
-  // If dropping, check if everything fell off screen
-  if (dropping && whip.every(p => p.y > H + 60)) {
+  if (dropping && allPoints().every(current => current.y > H + 80)) {
     whip = null;
     dropping = false;
     window.bridge.hideOverlay();
@@ -489,21 +514,20 @@ function update() {
   return { maxMotion, mouseMoved };
 }
 
-// ── Rendering ───────────────────────────────────────────────────────────────
 function getWhipBounds() {
-  if (!whip || whip.length === 0) return null;
+  const points = allPoints();
+  if (!points.length) return null;
   let minX = W;
   let minY = H;
   let maxX = 0;
   let maxY = 0;
-  for (const point of whip) {
-    minX = Math.min(minX, point.x);
-    minY = Math.min(minY, point.y);
-    maxX = Math.max(maxX, point.x);
-    maxY = Math.max(maxY, point.y);
+  for (const current of points) {
+    minX = Math.min(minX, current.x);
+    minY = Math.min(minY, current.y);
+    maxX = Math.max(maxX, current.x);
+    maxY = Math.max(maxY, current.y);
   }
-
-  const margin = 48;
+  const margin = activeStyle.id === 'cyber' ? 152 : 132;
   const x = Math.max(0, Math.floor(minX - margin));
   const y = Math.max(0, Math.floor(minY - margin));
   const right = Math.min(W, Math.ceil(maxX + margin));
@@ -521,6 +545,218 @@ function unionBounds(left, right) {
   return { x, y, width: rightEdge - x, height: bottomEdge - y };
 }
 
+function drawMetalRing(x, y, radius = 9) {
+  ctx.save();
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = activeStyle.visual.metal;
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.lineWidth = 1.4;
+  ctx.strokeStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.arc(x - 1, y - 1, radius - 2, Math.PI * 1.1, Math.PI * 1.75);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawGrip(anchor, angle, length, width) {
+  const endX = anchor.x - Math.cos(angle) * length;
+  const endY = anchor.y - Math.sin(angle) * length;
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = '#3d0710';
+  ctx.lineWidth = width + 4;
+  ctx.beginPath();
+  ctx.moveTo(anchor.x, anchor.y);
+  ctx.lineTo(endX, endY);
+  ctx.stroke();
+  ctx.strokeStyle = '#08090b';
+  ctx.lineWidth = width;
+  ctx.stroke();
+  ctx.strokeStyle = '#8c1322';
+  ctx.lineWidth = 2;
+  for (let t = 0.16; t < 0.92; t += 0.17) {
+    const centerX = lerp(anchor.x, endX, t);
+    const centerY = lerp(anchor.y, endY, t);
+    const normalX = Math.cos(angle + Math.PI / 2) * width * 0.42;
+    const normalY = Math.sin(angle + Math.PI / 2) * width * 0.42;
+    ctx.beginPath();
+    ctx.moveTo(centerX - normalX, centerY - normalY);
+    ctx.lineTo(centerX + normalX, centerY + normalY);
+    ctx.stroke();
+  }
+  ctx.restore();
+  drawMetalRing(endX, endY, width * 0.48);
+}
+
+function drawLayeredSpline(points, { edgeWidth, coreWidth, highlightWidth = 1.4, glow = 0 }) {
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  if (glow > 0) {
+    ctx.shadowColor = activeStyle.visual.highlight;
+    ctx.shadowBlur = glow * Math.max(0.15, crackPulse);
+  }
+  splinePath(points);
+  ctx.strokeStyle = activeStyle.visual.edge;
+  ctx.lineWidth = edgeWidth;
+  ctx.stroke();
+  splinePath(points);
+  ctx.strokeStyle = activeStyle.visual.core;
+  ctx.lineWidth = coreWidth;
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+  splinePath(points);
+  ctx.strokeStyle = activeStyle.visual.highlight;
+  ctx.globalAlpha = 0.64 + crackPulse * 0.3;
+  ctx.lineWidth = highlightWidth;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawLeather() {
+  const chain = allChains()[0];
+  if (!chain) return;
+  drawLayeredSpline(chain, { edgeWidth: 11, coreWidth: 7, highlightWidth: 1.5 });
+  drawGrip(chain[0], handleAngle, 72, activeStyle.visual.handleWidth);
+}
+
+function drawFlogger() {
+  const chains = allChains();
+  for (let index = chains.length - 1; index >= 0; index--) {
+    const emphasis = 1 - Math.abs(index - (chains.length - 1) / 2) / chains.length;
+    drawLayeredSpline(chains[index], {
+      edgeWidth: 7,
+      coreWidth: 4.2,
+      highlightWidth: 0.8 + emphasis * 0.6,
+    });
+  }
+  const anchor = chains[0]?.[0];
+  if (!anchor) return;
+  drawGrip(anchor, handleAngle, 86, activeStyle.visual.handleWidth);
+  drawMetalRing(anchor.x + Math.cos(handleAngle) * 6, anchor.y + Math.sin(handleAngle) * 6, 7);
+}
+
+function drawCrop() {
+  const chain = allChains()[0];
+  if (!chain || chain.length < 3) return;
+  const shaftEnd = chain[1];
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = activeStyle.visual.edge;
+  ctx.lineWidth = 12;
+  ctx.beginPath();
+  ctx.moveTo(chain[0].x, chain[0].y);
+  ctx.lineTo(shaftEnd.x, shaftEnd.y);
+  ctx.stroke();
+  ctx.strokeStyle = activeStyle.visual.core;
+  ctx.lineWidth = 7;
+  ctx.stroke();
+  ctx.strokeStyle = activeStyle.visual.highlight;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.restore();
+
+  drawLayeredSpline(chain.slice(1), { edgeWidth: 10, coreWidth: 6, highlightWidth: 1.3 });
+  const beforeTip = chain.at(-2);
+  const tip = chain.at(-1);
+  const angle = Math.atan2(tip.y - beforeTip.y, tip.x - beforeTip.x);
+  ctx.save();
+  ctx.translate(tip.x, tip.y);
+  ctx.rotate(angle);
+  ctx.fillStyle = activeStyle.visual.edge;
+  ctx.beginPath();
+  ctx.roundRect(-8, -14, 38, 28, 8);
+  ctx.fill();
+  ctx.fillStyle = activeStyle.visual.core;
+  ctx.beginPath();
+  ctx.roundRect(-5, -10, 32, 20, 6);
+  ctx.fill();
+  ctx.strokeStyle = activeStyle.visual.highlight;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.restore();
+  drawGrip(chain[0], handleAngle, 82, activeStyle.visual.handleWidth);
+}
+
+function drawChain() {
+  const chain = allChains()[0];
+  if (!chain) return;
+  ctx.save();
+  for (let index = 0; index < chain.length - 1; index++) {
+    const a = chain[index];
+    const b = chain[index + 1];
+    const midX = (a.x + b.x) / 2;
+    const midY = (a.y + b.y) / 2;
+    const angle = Math.atan2(b.y - a.y, b.x - a.x) + (index % 2 ? Math.PI / 2 : 0);
+    ctx.save();
+    ctx.translate(midX, midY);
+    ctx.rotate(angle);
+    ctx.strokeStyle = '#11141a';
+    ctx.lineWidth = 7;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 14, 7.5, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = activeStyle.visual.metal;
+    ctx.lineWidth = 3.5;
+    ctx.stroke();
+    ctx.strokeStyle = '#f4f5f7';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.ellipse(-1, -1, 12, 5.5, 0, Math.PI * 1.05, Math.PI * 1.8);
+    ctx.stroke();
+    ctx.restore();
+  }
+  ctx.restore();
+  drawGrip(chain[0], handleAngle, 78, activeStyle.visual.handleWidth);
+}
+
+function drawCyberArcs(chain) {
+  if (crackPulse < 0.08 || chain.length < 4) return;
+  const arcCount = Math.min(6, Math.floor(2 + crackPulse * 5));
+  ctx.save();
+  ctx.strokeStyle = '#ff4960';
+  ctx.lineWidth = 1.5;
+  ctx.shadowColor = '#ff1838';
+  ctx.shadowBlur = 10;
+  for (let index = 0; index < arcCount; index++) {
+    const startIndex = 1 + ((index * 3 + Math.floor(crackPulse * 10)) % (chain.length - 3));
+    const a = chain[startIndex];
+    const b = chain[startIndex + 2];
+    const phase = performance.now() * 0.04 + index * 2.3;
+    const offsetX = Math.cos(phase) * (9 + index);
+    const offsetY = Math.sin(phase * 1.2) * (9 + index);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo((a.x + b.x) / 2 + offsetX, (a.y + b.y) / 2 + offsetY);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawCyber() {
+  const chain = allChains()[0];
+  if (!chain) return;
+  drawLayeredSpline(chain, {
+    edgeWidth: 14,
+    coreWidth: 9,
+    highlightWidth: 2.2 + crackPulse * 1.8,
+    glow: activeStyle.visual.glow,
+  });
+  ctx.save();
+  ctx.setLineDash([12, 10]);
+  ctx.lineDashOffset = -performance.now() * 0.03;
+  splinePath(chain);
+  ctx.strokeStyle = '#5f0b18';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  ctx.restore();
+  drawCyberArcs(chain);
+  drawGrip(chain[0], handleAngle, 74, activeStyle.visual.handleWidth);
+}
+
 function draw() {
   const currentDrawBounds = getWhipBounds();
   const dirtyBounds = unionBounds(previousDrawBounds, currentDrawBounds);
@@ -529,76 +765,46 @@ function draw() {
     fillHitSurface(dirtyBounds.x, dirtyBounds.y, dirtyBounds.width, dirtyBounds.height);
   }
   previousDrawBounds = currentDrawBounds;
-
   if (!whip) return;
 
-  // White: thin halo on full spline, then extra thickness only over handle links.
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-  ctx.strokeStyle = '#fff';
-  if (whip.length >= 2) {
-    ctx.beginPath();
-    ctx.moveTo(whip[0].x, whip[0].y);
-    for (let i = 0; i < whip.length - 1; i++) {
-      const { cp1x, cp1y, cp2x, cp2y, x2, y2 } = whipSegmentBezier(whip, i);
-      ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, x2, y2);
-    }
-    ctx.lineWidth = P.lineWidthTip + P.outlineWidth * 2;
-    ctx.stroke();
-
-    const thickLinks = Math.min(P.handleThickSegments, whip.length - 1);
-    if (thickLinks > 0 && P.handleExtraWidth > 0) {
-      ctx.beginPath();
-      ctx.moveTo(whip[0].x, whip[0].y);
-      for (let i = 0; i < thickLinks; i++) {
-        const { cp1x, cp1y, cp2x, cp2y, x2, y2 } = whipSegmentBezier(whip, i);
-        ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, x2, y2);
-      }
-      ctx.lineWidth =
-        P.lineWidthHandle + P.handleExtraWidth + P.outlineWidth * 2;
-      ctx.stroke();
-    }
-  }
-
-  ctx.strokeStyle = '#111';
-  for (let i = 0; i < whip.length - 1; i++) {
-    const t = i / Math.max(1, whip.length - 2);
-    const extra = i < P.handleThickSegments ? P.handleExtraWidth : 0;
-    ctx.lineWidth = lerp(P.lineWidthHandle, P.lineWidthTip, t) + extra + crackPulse * t * 2;
-    const { cp1x, cp1y, cp2x, cp2y, x2, y2 } = whipSegmentBezier(whip, i);
-    ctx.beginPath();
-    ctx.moveTo(whip[i].x, whip[i].y);
-    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, x2, y2);
-    ctx.stroke();
+  switch (activeStyle.id) {
+    case 'crop': drawCrop(); break;
+    case 'flogger': drawFlogger(); break;
+    case 'chain': drawChain(); break;
+    case 'cyber': drawCyber(); break;
+    default: drawLeather(); break;
   }
 }
 
-// ── Main loop ───────────────────────────────────────────────────────────────
 let animationFrameId = null;
-let frameTimerId = null;
 let lastFrameAt = 0;
 let idlePhysicsFrames = 0;
 let settleFrames = 0;
+window.__codexWhipMetrics = { renderCosts: [], frameIntervals: [] };
 
 function scheduleFrame() {
-  if (animationFrameId !== null || frameTimerId !== null) return;
-  const delay = Math.max(0, TARGET_FRAME_INTERVAL_MS - (performance.now() - lastFrameAt));
-  if (delay > 4) {
-    frameTimerId = setTimeout(() => {
-      frameTimerId = null;
-      animationFrameId = requestAnimationFrame(loop);
-    }, delay);
-    return;
-  }
+  if (animationFrameId !== null) return;
   animationFrameId = requestAnimationFrame(loop);
 }
 
 function loop(timestamp) {
   animationFrameId = null;
+  if (lastFrameAt > 0 && timestamp - lastFrameAt < TARGET_FRAME_INTERVAL_MS - 1.5) {
+    animationFrameId = requestAnimationFrame(loop);
+    return;
+  }
+  const renderStartedAt = performance.now();
+  if (lastFrameAt > 0) {
+    window.__codexWhipMetrics.frameIntervals.push(timestamp - lastFrameAt);
+  }
   lastFrameAt = timestamp;
   const state = update();
   draw();
-
+  window.__codexWhipMetrics.renderCosts.push(performance.now() - renderStartedAt);
+  if (window.__codexWhipMetrics.renderCosts.length > 180) {
+    window.__codexWhipMetrics.renderCosts.shift();
+    window.__codexWhipMetrics.frameIntervals.shift();
+  }
   const activelyInteracting = dropping || state.mouseMoved || crackPulse > 0;
   if (activelyInteracting) {
     idlePhysicsFrames = 0;
@@ -606,27 +812,79 @@ function loop(timestamp) {
     scheduleFrame();
     return;
   }
-
   idlePhysicsFrames++;
   if (state.maxMotion > MOTION_EPSILON && idlePhysicsFrames < MAX_IDLE_PHYSICS_FRAMES) {
     settleFrames = 0;
     scheduleFrame();
     return;
   }
-
   if (settleFrames < SETTLE_FRAMES) {
     settleFrames++;
     scheduleFrame();
   }
 }
 
-// ── IPC from main process ───────────────────────────────────────────────────
-window.bridge.onSpawnWhip(() => {
+document.addEventListener('mousemove', event => {
+  mouseX = event.clientX;
+  mouseY = event.clientY;
+  if (!whip && !dropping && !closing) resetWhipState(mouseX, mouseY);
+  scheduleFrame();
+}, { passive: true });
+
+document.addEventListener('mousedown', event => {
+  if (!whip && !dropping && !closing) resetWhipState(event.clientX, event.clientY);
+  if (!whip || dropping || closing) return;
+  if (event.button === 2) {
+    leftWhipPending = false;
+    startDropping();
+    return;
+  }
+  if (event.button !== 0) return;
+  triggerCrackAnimation();
+  scheduleFrame();
+  const now = Date.now();
+  if (now - lastWhipRequestAt < LOCAL_SEND_COOLDOWN_MS) {
+    leftWhipPending = false;
+    return;
+  }
+  leftWhipPending = true;
+  playCrackSound();
+});
+
+document.addEventListener('mouseup', event => {
+  if (event.button !== 0 || !leftWhipPending) return;
+  leftWhipPending = false;
+  lastWhipRequestAt = Date.now();
+  setTimeout(() => {
+    if (!whip || dropping) return;
+    window.bridge.whipCrack()
+      .then(result => {
+        lastCrackResult = result || { status: 'failed', code: 'EMPTY_RESPONSE' };
+        document.body.dataset.whipStatus = lastCrackResult.status;
+      })
+      .catch(() => {
+        lastCrackResult = { status: 'failed', code: 'IPC_FAILED' };
+        document.body.dataset.whipStatus = lastCrackResult.status;
+      });
+  }, 500);
+});
+
+document.addEventListener('contextmenu', event => event.preventDefault());
+window.addEventListener('resize', () => {
+  resize();
+  scheduleFrame();
+});
+
+window.bridge.onSpawnWhip(payload => {
+  setActiveStyle(payload?.styleId, payload?.style);
   resetWhipState(mouseX || W / 2, mouseY || H / 2);
 });
 
-window.bridge.onRefreshWhip(() => {
-  if (!whip && !closing) {
+window.bridge.onRefreshWhip(payload => {
+  const nextStyleId = payload?.styleId || activeStyle.id;
+  const styleChanged = nextStyleId !== activeStyle.id;
+  if (styleChanged || payload?.style) setActiveStyle(nextStyleId, payload?.style);
+  if (payload?.respawn || styleChanged || (!whip && !closing)) {
     resetWhipState(mouseX || W / 2, mouseY || H / 2);
     return;
   }
@@ -634,6 +892,9 @@ window.bridge.onRefreshWhip(() => {
 });
 
 window.bridge.onDropWhip(startDropping);
+
+resize();
+setActiveStyle('leather');
 
 </script>
 </body>

@@ -1,6 +1,6 @@
 {
   "name": "codexwhip",
-  "version": "1.3.16",
+  "version": "1.4.0",
   "description": "A Windows desktop whip for Codex Desktop",
   "author": "zhoutian1995",
   "license": "MIT",
@@ -30,7 +30,11 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
+    "assets:brand": "electron scripts/generate-brand-assets.js",
+    "assets:sounds": "node scripts/generate-whip-sounds.js",
+    "assets": "npm run assets:brand && npm run assets:sounds",
     "test": "node --test",
+    "test:visual": "electron scripts/overlay-visual-smoke.js",
     "pack": "electron-builder --dir",
     "dist:win": "electron-builder --win nsis portable"
   },
@@ -62,8 +66,8 @@
       }
     ],
     "win": {
-      "icon": "icon/Template.png",
-      "signAndEditExecutable": false,
+      "icon": "icon/icon.ico",
+      "signExecutable": false,
       "target": [
         {
           "target": "nsis",
