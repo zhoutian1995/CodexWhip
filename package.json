@@ -1,12 +1,13 @@
 {
   "name": "codexwhip",
-  "version": "1.4.3",
-  "description": "A Windows desktop whip for Codex Desktop",
+  "version": "1.5.0",
+  "description": "A dark desktop whip for Codex Desktop on Windows and macOS",
   "author": "zhoutian1995",
   "license": "MIT",
   "main": "main.js",
   "os": [
-    "win32"
+    "win32",
+    "darwin"
   ],
   "engines": {
     "node": ">=22.12.0"
@@ -17,7 +18,8 @@
     "overlay",
     "codex",
     "desktop",
-    "windows"
+    "windows",
+    "macos"
   ],
   "repository": {
     "type": "git",
@@ -28,6 +30,7 @@
   },
   "homepage": "https://github.com/zhoutian1995/CodexWhip#readme",
   "scripts": {
+    "prestart": "node scripts/build-macos-helper.js",
     "start": "electron .",
     "dev": "electron .",
     "assets:brand": "electron scripts/generate-brand-assets.js",
@@ -36,7 +39,9 @@
     "test": "node --test",
     "test:visual": "electron scripts/overlay-visual-smoke.js",
     "pack": "electron-builder --dir",
-    "dist:win": "electron-builder --win nsis portable"
+    "build:mac-helper": "node scripts/build-macos-helper.js",
+    "dist:win": "electron-builder --win nsis portable",
+    "dist:mac": "npm run build:mac-helper && electron-builder --mac dmg zip --arm64"
   },
   "devDependencies": {
     "electron": "41.7.1",
@@ -64,15 +69,15 @@
       "icon/**/*",
       "package.json"
     ],
-    "extraResources": [
-      {
-        "from": "scripts/codex-desktop-ui.ps1",
-        "to": "scripts/codex-desktop-ui.ps1"
-      }
-    ],
     "win": {
       "icon": "icon/icon.ico",
       "signExecutable": false,
+      "extraResources": [
+        {
+          "from": "scripts/codex-desktop-ui.ps1",
+          "to": "scripts/codex-desktop-ui.ps1"
+        }
+      ],
       "target": [
         {
           "target": "nsis",
@@ -84,6 +89,35 @@
           "target": "portable",
           "arch": [
             "x64"
+          ]
+        }
+      ]
+    },
+    "mac": {
+      "icon": "icon/icon.icns",
+      "category": "public.app-category.utilities",
+      "identity": null,
+      "artifactName": "CodexWhip ${version} macOS ${arch}.${ext}",
+      "extendInfo": {
+        "LSUIElement": true
+      },
+      "extraResources": [
+        {
+          "from": "build/macos/codex-desktop-ui",
+          "to": "scripts/codex-desktop-ui"
+        }
+      ],
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
           ]
         }
       ]

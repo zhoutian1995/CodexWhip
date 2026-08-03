@@ -7,7 +7,9 @@
 > 算力喂得再多，它也只会原地发呆。
 > 这时候，你需要的不是更多 prompt，是一根鞭子。
 
-CodexWhip 是一个 Windows 桌面外挂。它给 Codex Desktop 配备了一根全屏透明、带物理和音效的电子牛马鞭：你抽它一下，它就给当前绑定的 Codex 任务发一句中文催促语，不抽就待机，抽到听话为止。
+CodexWhip 是一个 Windows + macOS 桌面外挂。它给 Codex Desktop 配备了一根全屏透明、带物理和音效的电子牛马鞭：你抽它一下，它就给当前绑定的 Codex 任务发一句中文催促语，不抽就待机，抽到听话为止。
+
+> Windows x64 为稳定版；macOS Apple Silicon 为首发测试版，已完成构建、启动和原生 helper 验证，真实发送仍需完成辅助功能授权后的最终实机校准。
 
 本质上：**你骂它，它干活。**
 
@@ -42,7 +44,7 @@ CodexWhip 是一个 Windows 桌面外挂。它给 Codex Desktop 配备了一根�
 
 ## 先看一眼效果
 
-1. 装好后双击 `CodexWhip.exe`，托盘里出现黑红皮革圆章图标。
+1. 装好后启动 `CodexWhip.exe`（Windows）或 `CodexWhip.app`（macOS），托盘/菜单栏出现图标。
 2. 托盘右键选择鞭子款式，也可以选择“随机轮换”。
 3. 点托盘图标，鞭子出现。
 4. 左键点屏幕，鞭响一声，一句中文催促语飞进 Codex 输入框并直接发送。
@@ -55,8 +57,9 @@ CodexWhip 是一个 Windows 桌面外挂。它给 Codex Desktop 配备了一根�
 ## 准备工作（一次性）
 
 1. 装好官方 Codex Desktop，打开它。
-2. 让 CodexWhip 和 Codex Desktop 用相同权限运行。别一个管理员一个普通，否则鞭子打不进去。
-3. 在 Codex 的 `Settings > General > Follow-up behavior` 里选择 `Steer`。CodexWhip 只用 TOML 解析器读取并确认这个设置，**不会自动改写** `%USERPROFILE%\.codex\config.toml`。这样左键消息直接加入当前运行，不会先生成一张带“引导”按钮的排队卡片。如果它无法确认这个设置，**它宁可不打，也不空打**，原因只在托盘菜单里显示。
+2. Windows 上让 CodexWhip 和 Codex Desktop 用相同权限运行。别一个管理员一个普通，否则鞭子打不进去。
+3. macOS 首次启动时，在 `系统设置 > 隐私与安全性 > 辅助功能` 中启用 `CodexWhip`，然后重启 CodexWhip。程序不需要“屏幕录制”权限，也不使用 AppleScript 盲打。
+4. 在 Codex 的 `Settings > General > Follow-up behavior` 里选择 `Steer`。CodexWhip 只用 TOML 解析器读取并确认这个设置，**不会自动改写** `~/.codex/config.toml`。这样左键消息直接加入当前运行，不会先生成一张带“引导”按钮的排队卡片。如果它无法确认这个设置，**它宁可不打，也不空打**，原因只在托盘菜单里显示。
 
 也就是说：设置一次，之后它就只认 `Steer`，简单粗暴。
 
@@ -64,7 +67,7 @@ CodexWhip 是一个 Windows 桌面外挂。它给 Codex Desktop 配备了一根�
 
 ## 日常使用
 
-1. 启动 `CodexWhip.exe`，常驻托盘，鞭子自动出现。
+1. 启动 CodexWhip，常驻 Windows 托盘或 macOS 菜单栏，鞭子自动出现。
 2. 在 Codex Desktop 里打开目标任务。
 3. 右键托盘图标，选“绑定当前 Codex 任务”。绑定成功后它会记住任务标题。
 4. 在“鞭子款式”里选择固定款式或随机轮换，选择会自动保存。
@@ -77,7 +80,8 @@ CodexWhip 是一个 Windows 桌面外挂。它给 Codex Desktop 配备了一根�
 款式选择保存在：
 
 ```text
-%APPDATA%\codexwhip\settings.json
+Windows: %APPDATA%\codexwhip\settings.json
+macOS:   ~/Library/Application Support/codexwhip/settings.json
 ```
 
 ```json
@@ -116,7 +120,8 @@ CodexWhip 是一个 Windows 桌面外挂。它给 Codex Desktop 配备了一根�
 完整的 20 句开箱即用，但全部可改。词库是一个纯 JSON 文件：
 
 ```text
-%APPDATA%\codexwhip\phrases.json
+Windows: %APPDATA%\codexwhip\phrases.json
+macOS:   ~/Library/Application Support/codexwhip/phrases.json
 ```
 
 ```json
@@ -143,7 +148,8 @@ CodexWhip 是一个 Windows 桌面外挂。它给 Codex Desktop 配备了一根�
 它不会记住你随口绑过谁，它只认标题。绑定信息存在：
 
 ```text
-%APPDATA%\codexwhip\binding.json
+Windows: %APPDATA%\codexwhip\binding.json
+macOS:   ~/Library/Application Support/codexwhip/binding.json
 ```
 
 文件里只有任务标题，不存容易过期的界面运行时 ID。重启后，只有当前任务标题一致、且侧栏里这个名字唯一时，它才会重新认领并自动恢复绑定；否则它会装作没见过你，让你重新绑定。
@@ -152,12 +158,21 @@ CodexWhip 是一个 Windows 桌面外挂。它给 Codex Desktop 配备了一根�
 
 ## 安装
 
-在 [Releases](https://github.com/zhoutian1995/CodexWhip/releases) 里下载最新版，二选一：
+在 [Releases](https://github.com/zhoutian1995/CodexWhip/releases) 里下载最新版。
+
+Windows 二选一：
 
 - `CodexWhip Setup <version>.exe`：NSIS 安装版，可选安装目录，开始菜单里有快捷方式。
 - `CodexWhip Portable <version>.exe`：便携版，直接运行，不用安装。
 
 当前构建未签名，Windows SmartScreen 可能提示风险。请只从本仓库 Releases 下载；代码签名要钱，暂时先穷着。
+
+macOS（Apple Silicon，首发测试版）：
+
+- `CodexWhip <version> macOS arm64.dmg`：拖入“应用程序”目录。
+- `CodexWhip <version> macOS arm64.zip`：解压后直接运行。
+
+macOS 构建暂未公证。首次启动如被 Gatekeeper 拦截，请在 Finder 中右键应用选择“打开”，然后按上面的步骤授予辅助功能权限。当前首发只提供 Apple Silicon (`arm64`) 包。
 
 ---
 
@@ -177,12 +192,22 @@ npm run test:visual
 npm run dist:win
 ```
 
+macOS 构建必须在 Mac 上执行；`npm start` 会先编译原生 Accessibility helper：
+
+```bash
+npm install
+npm start
+npm run dist:mac
+```
+
 产物在 `dist/`：
 
 - `CodexWhip Setup <version>.exe`
 - `CodexWhip Portable <version>.exe`
+- `CodexWhip <version> macOS arm64.dmg`
+- `CodexWhip <version> macOS arm64.zip`
 
-环境要求：Windows。开发和构建建议使用 Node.js >= 22.12；已安装的桌面程序不需要单独安装 Node.js。
+环境要求：Windows x64 或 Apple Silicon macOS。开发和构建建议使用 Node.js >= 22.12；macOS 还需要 Xcode Command Line Tools 来编译 Swift helper。已安装的桌面程序不需要单独安装 Node.js。
 
 安全回归：
 
@@ -190,15 +215,17 @@ npm run dist:win
 - 每次全局键盘注入前都复核前台 HWND、输入焦点、任务标题和 runtime ID。
 - 发送前记录同文消息 runtime ID，发送后只接受唯一新增节点；重复催促词不会去猜历史消息。
 - 没有正向投递证据时返回失败，不会把“输入框空了”冒充成发送成功。
+- macOS 使用原生 Accessibility API，提交前复核前台应用、绑定任务、输入框 runtime ID、焦点和草稿；Enter 定向投递给 Codex 进程。
 
 ---
 
 ## 局限与声明
 
-- 只支持 Windows 官方 Codex Desktop。
+- 支持 Windows x64；Apple Silicon macOS 当前为首发测试版。
 - 它是独立外挂，不修改官方应用，也不连它的内部 stdio App Server，纯属外部鞭打。
 - Codex 的 UI 会更新，控件结构可能变；识别以进程、控件类型和类名为准，中文文案只作辅助。
-- 暂不做开机自启、代码签名、自动更新、npm 发布和 macOS 适配。
+- macOS 版依赖系统辅助功能权限；当前未签名、未公证，也暂不提供 Intel (`x64`) 包。
+- 暂不做开机自启、代码签名、自动更新和 npm 发布。
 
 ---
 
@@ -210,6 +237,7 @@ npm run dist:win
 - [x] 抽完不卡
 - [x] 四种独立鞭子和原创音效
 - [x] 托盘切换与随机轮换
+- [x] Windows + macOS 双平台控制器（macOS 首发测试）
 - [ ] 开机自启
 - [ ] 代码签名（等有钱）
 - [ ] 自动更新

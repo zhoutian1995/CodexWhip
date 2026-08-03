@@ -49,6 +49,13 @@ test('Windows ICO contains all tray and installer sizes', () => {
   assert.deepEqual(sizes, [16, 24, 32, 48, 256]);
 });
 
+test('macOS ICNS exists and has a valid container header', () => {
+  const icon = fs.readFileSync(path.join(ROOT, 'icon', 'icon.icns'));
+  assert.equal(icon.subarray(0, 4).toString('ascii'), 'icns');
+  assert.equal(icon.readUInt32BE(4), icon.length);
+  assert.ok(icon.length > 100_000);
+});
+
 test('four original WAV files are valid, distinct and referenced by styles', () => {
   const names = ['leather.wav', 'flogger.wav', 'chain.wav', 'cyber.wav'];
   const referencedNames = getStyleCatalog().flatMap(style => style.soundSources)

@@ -8,6 +8,7 @@ const {
   nativeImage,
   screen,
   shell,
+  systemPreferences,
 } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -15,7 +16,7 @@ const {
   messageForResult,
   probeCodexDesktop,
   sendWhipMessage,
-} = require('./lib/codex-desktop-windows');
+} = require('./lib/codex-desktop');
 const {
   clearBinding,
   loadBinding,
@@ -61,6 +62,7 @@ const DROP_HIDE_TIMEOUT_MS = 1800;
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 const STATUS_MESSAGES = Object.freeze({
   APP_NOT_RUNNING: 'Codex Desktop 未启动',
+  ACCESSIBILITY_PERMISSION_REQUIRED: '请在 macOS 设置中允许 CodexWhip 使用辅助功能',
   CODEX_MODE_NOT_FOUND: '当前不是 Codex 模式',
   COMPOSER_NOT_FOUND: '没有找到 Codex 输入框',
   AMBIGUOUS_WINDOWS: '存在多个 Codex 窗口，无法确定目标',
@@ -101,12 +103,37 @@ function createTrayIconFallback() {
 }
 
 function getTrayIcon() {
-  const iconPath = path.join(__dirname, 'icon', 'icon.ico');
+  const iconPath = path.join(
+    __dirname,
+    'icon',
+    process.platform === 'darwin' ? 'Template.png' : 'icon.ico'
+  );
   if (fs.existsSync(iconPath)) {
     const image = nativeImage.createFromPath(iconPath);
-    if (!image.isEmpty()) return image;
+    if (!image.isEmpty()) {
+      if (process.platform === 'darwin') image.setTemplateImage(true);
+      return image;
+    }
   }
   return createTrayIconFallback();
+}
+
+function requestMacAccessibilityPermission(prompt = true) {
+  if (process.platform !== 'darwin') return true;
+  const trusted = systemPreferences.isTrustedAccessibilityClient(prompt);
+  if (tray) {
+    setTrayStatus(trusted
+      ? 'macOS 辅助功能权限正常'
+      : '请在系统设置 > 隐私与安全性 > 辅助功能中启用 CodexWhip');
+  }
+  return trusted;
+}
+
+async function openMacAccessibilitySettings() {
+  if (process.platform !== 'darwin') return;
+  await shell.openExternal(
+    'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'
+  );
 }
 
 function shorten(value, maxLength = 32) {
@@ -195,6 +222,11 @@ function refreshTrayMenu() {
       { type: 'separator' },
       { label: '打开中文催促词库', click: openPhraseLibrary },
       { label: '重新加载词库', click: reloadPhraseLibrary },
+      ...(process.platform === 'darwin' ? [
+        { type: 'separator' },
+        { label: '检查 macOS 辅助功能权限', click: () => requestMacAccessibilityPermission(true) },
+        { label: '打开 macOS 辅助功能设置', click: openMacAccessibilitySettings },
+      ] : []),
       { label: `状态：${shorten(trayStatus, 42)}`, enabled: false },
       { type: 'separator' },
       { label: '退出', click: () => app.quit() },
@@ -514,13 +546,14 @@ if (!hasSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
-    if (process.platform !== 'win32') {
-      console.warn('codexwhip: CodexWhip Desktop currently supports Windows only.');
+    if (!['win32', 'darwin'].includes(process.platform)) {
+      console.warn('codexwhip: CodexWhip Desktop supports Windows and macOS only.');
       app.quit();
       return;
     }
 
-    app.setAppUserModelId('com.weiling.codexwhip');
+    if (process.platform === 'win32') app.setAppUserModelId('com.weiling.codexwhip');
+    if (process.platform === 'darwin') app.dock?.hide();
     const steerModeResult = ensureCodexSteerMode();
     steerModeReady = steerModeResult.ok;
     const storageDir = path.join(app.getPath('appData'), 'codexwhip');
@@ -536,7 +569,11 @@ if (!hasSingleInstanceLock) {
     refreshTrayMenu();
     tray.on('click', toggleOverlay);
 
+    const accessibilityReady = requestMacAccessibilityPermission(true);
     await restoreSavedSession();
+    if (!accessibilityReady) {
+      setTrayStatus('请先授予 macOS 辅助功能权限，再绑定 Codex 任务');
+    }
     if (!steerModeResult.ok) {
       setTrayStatus(`直接发送未启用：${statusForResult(steerModeResult)}`);
     }
