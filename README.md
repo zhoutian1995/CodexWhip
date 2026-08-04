@@ -220,6 +220,14 @@ npm run dist:mac
 - 当前没有代码签名、macOS 公证、自动更新和开机自启。
 - 不支持 macOS Intel 和 Linux。
 
+## 联系作者
+
+使用中遇到问题、想交流 CodexWhip，或者单纯想催更，可以扫码添加作者微信。添加时请备注 `CodexWhip`。
+
+<p align="center">
+  <img src="assets/wechat-wille.jpg" alt="作者微信二维码" width="360">
+</p>
+
 ## 致谢
 
 - 鞭子物理和最初玩法来自 [GitFrog1111/OpenWhip](https://github.com/GitFrog1111/OpenWhip)，原项目采用 MIT License。
