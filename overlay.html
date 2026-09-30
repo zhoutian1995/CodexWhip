@@ -190,6 +190,7 @@
     padding: 6px 8px 2px;
     color: rgba(255, 216, 220, 0.76);
     font-size: 11px;
+    text-align: right;
     overflow-wrap: anywhere;
   }
   #actionPanelStatus[data-tone="success"] { color: #8ee6b1; }
@@ -215,12 +216,12 @@
 </div>
 <div id="actionPanel" aria-label="鞭子操作台">
   <button id="actionPanelToggle" type="button" aria-expanded="false" aria-controls="actionPanelMenu">🎬 操作台</button>
+  <div id="actionPanelStatus" role="status" aria-live="polite">状态：未绑定任务</div>
   <div id="actionPanelMenu">
     <div class="actionPanelHint">这里可以直接检查 Codex 绑定和词库</div>
     <button type="button" data-action="bind" aria-busy="false">🔗 绑定当前会话</button>
     <button type="button" data-action="test" aria-busy="false">🧪 测试当前绑定</button>
     <button type="button" data-action="phrases" aria-busy="false">📖 打开中文词库</button>
-    <div id="actionPanelStatus" role="status" aria-live="polite">状态：未绑定任务</div>
   </div>
 </div>
 <canvas id="c"></canvas>

@@ -12,6 +12,7 @@ const {
 } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
+const { execFile } = require('node:child_process');
 const {
   messageForResult,
   probeCodexDesktop,
@@ -382,7 +383,24 @@ function initializePhraseLibrary() {
 }
 
 async function openPhraseLibrary() {
-  const error = await shell.openPath(phraseFilePath);
+  // The full-screen whip otherwise covers the editor and intercepts clicks,
+  // making a successful open look like a no-op.
+  const wasVisible = isOverlayVisible();
+  if (wasVisible) hideOverlay();
+  let error;
+  try {
+    error = await shell.openPath(phraseFilePath);
+    if (error && process.platform === 'darwin') {
+      error = await new Promise(resolve => {
+        execFile('/usr/bin/open', ['-a', 'TextEdit', phraseFilePath], cause => {
+          resolve(cause?.message || '');
+        });
+      });
+    }
+  } catch (cause) {
+    error = cause?.message || String(cause);
+  }
+  if (error && wasVisible) revealOverlay();
   const message = error ? `打开词库失败：${error}` : '已打开中文催促词库';
   setTrayStatus(message);
   return {
@@ -540,6 +558,7 @@ async function performWhipSend() {
     }
 
     const phrase = phraseLibrary?.choose() || DEFAULT_PHRASES[0];
+    setTrayStatus(`正在发送到「${shorten(boundSession.taskTitle, 20)}」：${phrase}`);
     const result = await sendWhipMessage({
       phrase,
       preferredHwnd: boundSession.hwnd,

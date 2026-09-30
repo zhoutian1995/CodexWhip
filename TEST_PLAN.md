@@ -1,8 +1,8 @@
-# CodexWhip 1.5.1 Test Plan
+# CodexWhip 1.5.3 Test Plan
 
 ## Goal
 
-Keep the four whip styles and guarded delivery behavior while restoring compatibility with the current ChatGPT/Codex desktop accessibility trees on macOS and Windows. The 1.5.1 patch also updates the regression fixtures used for the migrated sidebar and composer selectors.
+Keep the four whip styles and guarded delivery behavior while restoring compatibility with the current ChatGPT/Codex desktop accessibility trees on macOS and Windows. The 1.5.3 patch also updates the regression fixtures used for the migrated sidebar and composer selectors.
 
 ## Release Gates
 
@@ -30,8 +30,8 @@ Keep the four whip styles and guarded delivery behavior while restoring compatib
    - README and settings documentation do not advertise `crop`.
 5. Packaging and installation
    - `npm audit --omit=dev` reports zero production vulnerabilities.
-   - `npm run dist:win` creates Setup and Portable executables for version 1.5.1.
-   - The installed application reports version 1.5.1.
+   - `npm run dist:win` creates Setup and Portable executables for version 1.5.3.
+   - The installed application reports version 1.5.3.
    - Existing binding and phrase files keep their original hashes.
    - A previous `crop` setting resolves to the leather whip.
 6. GitHub publication
@@ -42,10 +42,10 @@ Keep the four whip styles and guarded delivery behavior while restoring compatib
 
 | Gate | Result | Evidence |
 | --- | --- | --- |
-| Source and configuration | Partial | JavaScript syntax checks, Swift helper compilation, and `git diff --check` pass; macOS live probe returns `READY`; Windows UIA parser and live probe remain unverified on this host. |
-| Unit and contract | Pass | `npm test`: 52 tests passed sequentially, including the current AX fixture and migrated UIA contract tests. |
-| Overlay and performance | Pending | Recheck four-style rendering, click interactions, close controls, frame cost, and idle repainting. |
-| Assets and documentation | Pending | Existing four-style assets remain covered; rerun the asset and documentation checks for the 1.5.1 package. |
-| Packaging | Pending | Run the production audit and build the 1.5.1 Setup and Portable artifacts. |
-| Installed application | Pending | Install the 1.5.1 artifact and verify binding, phrase, settings, and right-click behavior. |
-| GitHub publication | Pending | Push, tag, release, and uploaded asset digests are the final release actions. |
+| Source and configuration | Pass | JavaScript tests, Swift helper compilation, `git diff --check`, the current AX fixture, and the mock bound-send flow pass; live Codex probing was intentionally not repeated against the user's active session. |
+| Unit and contract | Pass | `npm test`: 62 tests passed sequentially, including binding→whip→send mocks, phrase-editor recovery, the current AX fixture, and migrated UIA contract tests. |
+| Overlay and performance | Partial | Visual smoke confirms click counts, close controls, four-style activation, viewport rendering, and idle repaint stop; the host's frame cadence exceeded the 34ms smoke threshold for several styles. |
+| Assets and documentation | Pending | Existing four-style assets remain covered; rerun the asset and documentation checks for the 1.5.3 package. |
+| Packaging | Pass | `npm run dist:mac` created the 1.5.3 arm64 DMG and ZIP; the installed app reports 1.5.3 and its helper hash matches the build. |
+| Installed application | Partial | The installed overlay visibly exposes style/action controls and the always-visible send status; real binding/send was not exercised against the user's active Codex session. |
+| GitHub publication | Pending | Commit and push the final send-status, AX window-title, and mock delivery-test changes. |

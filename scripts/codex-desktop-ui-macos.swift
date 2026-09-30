@@ -185,10 +185,11 @@ func hasClassToken(_ classes: String, _ token: String) -> Bool {
 func isPlaceholder(_ value: String) -> Bool {
     let text = normalized(value).lowercased()
     if text.isEmpty { return true }
+    if text == "消息" { return true }
     let prefixes = [
         "describe your task", "message codex", "ask codex", "what do you want",
         "work with chatgpt", "work with codex", "send a message",
-        "描述你的任务", "与 chatgpt 协作", "与 codex 协作", "随心输入", "消息"
+        "描述你的任务", "与 chatgpt 协作", "与 codex 协作", "随心输入"
     ]
     return prefixes.contains { text.hasPrefix($0) }
 }
@@ -215,13 +216,15 @@ func findComposer(in nodes: [AXUIElement], windowFrame: FrameInfo?) -> AXUIEleme
         let role = stringAttribute(element, kAXRoleAttribute)
         let classes = classText(element)
         let placeholder = stringAttribute(element, "AXPlaceholderValue")
-        let name = "\(elementName(element)) \(placeholder)".lowercased()
+        let title = elementName(element).lowercased()
+        let name = "\(title) \(placeholder)".lowercased()
         let frame = frameOf(element)
         let roleMatches = role == kAXTextAreaRole || role == kAXTextFieldRole || role == "AXGroup"
         let classMatches = classes.contains("prosemirror")
         let promptMatches = name.contains("message codex") || name.contains("ask codex") ||
             name.contains("describe your task") || name.contains("描述你的任务") ||
-            name.contains("与 codex 协作") || name.contains("消息")
+            name.contains("与 codex 协作") ||
+            (role == kAXTextAreaRole && (title == "消息" || placeholder == "消息"))
         if !classMatches && !(roleMatches && promptMatches) { continue }
         if boolAttribute(element, kAXHiddenAttribute) || !boolAttribute(element, kAXEnabledAttribute) && roleMatches { continue }
         if let frame, (frame.width < 20 || frame.height < 20) { continue }
@@ -281,8 +284,9 @@ func activeDocumentTitles(in nodes: [AXUIElement], windowFrame: FrameInfo?) -> S
     return Set(areas.filter { $0.2 >= largestArea * 0.60 }.map { $0.0 })
 }
 
-func findTask(in nodes: [AXUIElement], windowFrame: FrameInfo?) -> TaskIdentity? {
+func findTask(in nodes: [AXUIElement], windowFrame: FrameInfo?, windowTitle: String = "") -> TaskIdentity? {
     let documentTitles = activeDocumentTitles(in: nodes, windowFrame: windowFrame)
+    let normalizedWindowTitle = normalized(windowTitle)
     var matches: [(Int, TaskIdentity)] = []
     for element in nodes {
         let role = stringAttribute(element, kAXRoleAttribute)
@@ -299,11 +303,13 @@ func findTask(in nodes: [AXUIElement], windowFrame: FrameInfo?) -> TaskIdentity?
         // Match the complete utility token. `contains` would also match the
         // variant token (`data-[...]:bg-primary-ghost-hover`) that is present
         // on every row in the current ChatGPT shell.
+        let threadRowShape = hasClassToken(classes, "group") || selectedMarker
         let activeClass = hasClassToken(classes, "bg-token-list-hover-background") ||
-            hasClassToken(classes, "bg-primary-ghost-hover") ||
+            (hasClassToken(classes, "bg-primary-ghost-hover") && threadRowShape) ||
             (selectedMarker && selected)
         let sidebarClass = classes.contains("sidebar-item")
         let documentTitleMatch = documentTitles.contains(title)
+        let windowTitleMatch = !normalizedWindowTitle.isEmpty && title == normalizedWindowTitle
         let frame = frameOf(element)
         let visibleSidebarRow: Bool
         if let frame {
@@ -319,12 +325,14 @@ func findTask(in nodes: [AXUIElement], windowFrame: FrameInfo?) -> TaskIdentity?
             leftSidebarGeometry = false
         }
         guard activeClass || (documentTitleMatch && visibleSidebarRow) ||
+            (windowTitleMatch && visibleSidebarRow) ||
             (selected && (sidebarClass || leftSidebarGeometry)) else { continue }
         var score = activeClass ? 100 : 0
         if sidebarClass { score += 50 }
         if selected { score += 30 }
         if leftSidebarGeometry { score += 10 }
         if documentTitleMatch { score += 240 }
+        if windowTitleMatch { score += 220 }
         matches.append((score, TaskIdentity(
             title: title,
             runtimeId: runtimeId(element, prefix: "task"),
@@ -364,12 +372,16 @@ func analyzeWindow(_ window: AXUIElement, app: NSRunningApplication, targetTitle
     // composer is still a strong identity signal, including when it is a
     // plain AXTextArea named “消息” without the old prosemirror class.
     let composerPlaceholder = stringAttribute(composer, "AXPlaceholderValue")
-    let composerIdentityText = "\(elementName(composer)) \(composerPlaceholder)".lowercased()
     let composerLooksLikeCodex = classText(composer).contains("prosemirror") ||
-        composerIdentityText.contains("消息")
+        (stringAttribute(composer, kAXRoleAttribute) == kAXTextAreaRole &&
+            (elementName(composer) == "消息" || composerPlaceholder == "消息"))
     if !hasCodexDocument && !composerLooksLikeCodex { return nil }
 
-    let task = findTask(in: nodes, windowFrame: frameOf(window))
+    let task = findTask(
+        in: nodes,
+        windowFrame: frameOf(window),
+        windowTitle: elementName(window)
+    )
     let titleForCount = targetTitle.isEmpty ? (task?.title ?? "") : targetTitle
     return CodexCandidate(
         app: app,
