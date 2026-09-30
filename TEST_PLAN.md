@@ -48,4 +48,4 @@ Keep the four whip styles and guarded delivery behavior while restoring compatib
 | Assets and documentation | Pass | Existing four-style assets remain covered; README and test-plan references are aligned with the 1.5.6 package. |
 | Packaging | Pass | `npm run dist:mac` created the 1.5.6 arm64 DMG and ZIP; the installed app reports 1.5.6 and its helper hash matches the build. |
 | Installed application | Partial | The installed 1.5.6 overlay exposes style/action controls and the always-visible send status; real binding/send was not exercised against the user's active Codex session. |
-| GitHub publication | Pending | Commit and push the 1.5.6 application focus and overlay delivery fix. |
+| GitHub publication | Pass | Commit `74c1561` containing the 1.5.6 application focus and overlay delivery fix is pushed to `origin/main`. |
