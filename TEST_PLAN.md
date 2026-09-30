@@ -48,4 +48,4 @@ Keep the four whip styles and guarded delivery behavior while restoring compatib
 | Assets and documentation | Pass | Existing four-style assets remain covered; README and test-plan references are aligned with the 1.5.4 package. |
 | Packaging | Pass | `npm run dist:mac` created the 1.5.4 arm64 DMG and ZIP; the installed app reports 1.5.4 and its helper hash matches the build. |
 | Installed application | Partial | The installed 1.5.4 overlay visibly exposes style/action controls and the always-visible send status; real binding/send was not exercised against the user's active Codex session. |
-| GitHub publication | Pass | The guarded focus/dynamic-window-id fix, tests, packaging metadata, and documentation are ready to commit and push. |
+| GitHub publication | Pass | Commit `dfd603c` containing the guarded focus/dynamic-window-id fix, tests, packaging metadata, and documentation is pushed to `origin/main`. |
