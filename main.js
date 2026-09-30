@@ -57,6 +57,7 @@ let escapeRegistered = false;
 let steerModeReady = false;
 let selectedWhipStyle = DEFAULT_STYLE_ID;
 let activeWhipStyle = DEFAULT_STYLE_ID;
+let overlayHiddenForDesktopSend = false;
 
 const SEND_COOLDOWN_MS = 1500;
 const DROP_HIDE_TIMEOUT_MS = 1800;
@@ -531,6 +532,11 @@ async function lowerOverlayForDesktopSend() {
   if (!isOverlayVisible()) return;
   overlay.setIgnoreMouseEvents(true);
   overlay.setAlwaysOnTop(false);
+  // Hiding the transparent full-screen window removes it from the hit-test
+  // stack entirely. This is more reliable than lowering z-order while a
+  // native accessibility click is trying to focus Codex's composer.
+  overlay.hide();
+  overlayHiddenForDesktopSend = true;
   // Give macOS enough time to hand frontmost focus back to Codex before the
   // accessibility helper raises the bound window and focuses its composer.
   await new Promise(resolve => setTimeout(resolve, 180));
@@ -538,10 +544,12 @@ async function lowerOverlayForDesktopSend() {
 
 function restoreOverlayAfterDesktopSend() {
   if (!isOverlayUsable()) return;
+  const restoreVisibility = overlayHiddenForDesktopSend;
+  overlayHiddenForDesktopSend = false;
   overlay.setAlwaysOnTop(true, 'screen-saver');
   overlay.setIgnoreMouseEvents(false);
+  if (restoreVisibility) overlay.showInactive();
   if (overlay.isVisible()) {
-    overlay.showInactive();
     setTimeout(() => {
       if (isOverlayVisible() && overlayReady) {
         overlay.webContents.send('refresh-whip', stylePayload());

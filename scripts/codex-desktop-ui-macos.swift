@@ -455,15 +455,34 @@ func raiseWindow(_ window: AXUIElement) {
     _ = AXUIElementSetAttributeValue(window, kAXFocusedAttribute as CFString, kCFBooleanTrue)
 }
 
-func focusComposer(_ composer: AXUIElement) -> Bool {
+func clickComposer(_ composer: AXUIElement) {
+    guard let frame = frameOf(composer), frame.width >= 20, frame.height >= 20 else { return }
+    let point = CGPoint(x: frame.x + frame.width * 0.5, y: frame.y + frame.height * 0.5)
+    guard let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown,
+                             mouseCursorPosition: point, mouseButton: .left),
+          let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp,
+                           mouseCursorPosition: point, mouseButton: .left) else { return }
+    down.post(tap: .cghidEventTap)
+    up.post(tap: .cghidEventTap)
+}
+
+func focusComposer(_ composer: AXUIElement, pid: pid_t) -> Bool {
     for _ in 0..<6 {
+        _ = AXUIElementPerformAction(composer, kAXPressAction as CFString)
         _ = AXUIElementSetAttributeValue(composer, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        clickComposer(composer)
         usleep(80_000)
+        let app = AXUIElementCreateApplication(pid)
+        if let focused = elementAttribute(app, kAXFocusedUIElementAttribute),
+           isDescendant(focused, of: composer) {
+            return true
+        }
         let system = AXUIElementCreateSystemWide()
         if let focused = elementAttribute(system, kAXFocusedUIElementAttribute),
            isDescendant(focused, of: composer) {
             return true
         }
+        if boolAttribute(composer, kAXFocusedAttribute) { return true }
     }
     return false
 }
@@ -626,7 +645,7 @@ guard selected.composerRuntimeId == initialComposerRuntimeId else {
 guard selected.draftText.isEmpty else {
     emit(false, "DRAFT_PRESENT", ["hwnd": selected.windowId])
 }
-guard focusComposer(selected.composer) else {
+guard focusComposer(selected.composer, pid: codexApp.processIdentifier) else {
     emit(false, "FOCUS_FAILED", ["hwnd": selected.windowId])
 }
 guard let inputMethod = setComposerText(
@@ -650,7 +669,7 @@ guard composerText(beforeSubmit.composer) == arguments.expectedText else {
     emit(false, "DRAFT_CHANGED", ["hwnd": beforeSubmit.windowId])
 }
 guard activate(codexApp),
-      focusComposer(beforeSubmit.composer) else {
+      focusComposer(beforeSubmit.composer, pid: codexApp.processIdentifier) else {
     emit(false, "FOCUS_FAILED", ["hwnd": beforeSubmit.windowId])
 }
 guard pressEnter(pid: codexApp.processIdentifier) else {
