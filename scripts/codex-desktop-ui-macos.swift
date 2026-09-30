@@ -242,6 +242,33 @@ func findComposer(in nodes: [AXUIElement], windowFrame: FrameInfo?) -> AXUIEleme
     return scored.sorted { $0.0 > $1.0 }.first?.1
 }
 
+func findComposerByHitTest(app: NSRunningApplication, windowFrame: FrameInfo?) -> AXUIElement? {
+    guard let windowFrame else { return nil }
+    let application = AXUIElementCreateApplication(app.processIdentifier)
+    let xRatios: [CGFloat] = [0.32, 0.42, 0.50, 0.58, 0.68]
+    let yRatios: [CGFloat] = [0.82, 0.88, 0.92, 0.96]
+    for xRatio in xRatios {
+        for yRatio in yRatios {
+            let point = CGPoint(
+                x: windowFrame.x + windowFrame.width * xRatio,
+                y: windowFrame.y + windowFrame.height * yRatio
+            )
+            var hit: AXUIElement?
+            guard AXUIElementCopyElementAtPosition(
+                application,
+                Float(point.x),
+                Float(point.y),
+                &hit
+            ) == .success, let hit else { continue }
+            let hitNodes = [hit] + descendants(of: hit)
+            if let composer = findComposer(in: hitNodes, windowFrame: windowFrame) {
+                return composer
+            }
+        }
+    }
+    return nil
+}
+
 func isGenericDocumentTitle(_ title: String) -> Bool {
     let value = normalized(title).lowercased()
     if value.isEmpty { return true }
@@ -361,7 +388,9 @@ func taskTitleMatchCount(in nodes: [AXUIElement], title: String) -> Int {
 func analyzeWindow(_ window: AXUIElement, app: NSRunningApplication, targetTitle: String) -> CodexCandidate? {
     if boolAttribute(window, kAXMinimizedAttribute) { return nil }
     let nodes = descendants(of: window)
-    guard let composer = findComposer(in: nodes, windowFrame: frameOf(window)) else { return nil }
+    let windowFrame = frameOf(window)
+    guard let composer = findComposer(in: nodes, windowFrame: windowFrame) ??
+        findComposerByHitTest(app: app, windowFrame: windowFrame) else { return nil }
     let webAreas = nodes.filter { stringAttribute($0, kAXRoleAttribute) == "AXWebArea" }
     let hasCodexDocument = webAreas.contains {
         let name = "\(elementName($0)) \(stringAttribute($0, kAXValueAttribute))".lowercased()
@@ -682,9 +711,9 @@ for _ in 0..<25 {
     let currentCandidates = allCandidates(app: codexApp, targetTitle: arguments.targetTaskTitle)
     guard let current = candidateForTask(currentCandidates, windowId: initialWindowId, task: selected.task) else { continue }
     verifyIdentity(current, arguments: arguments)
-    if current.composerRuntimeId != initialComposerRuntimeId {
-        emit(false, "COMPOSER_CHANGED", ["hwnd": current.windowId])
-    }
+    // Codex often rebuilds the composer after Enter; delivery proof is the
+    // message id plus an empty draft, so do not treat that expected
+    // replacement as a send failure.
     finalDraft = current.draftText
     let afterIds = matchingTextRuntimeIds(in: current.window, text: arguments.expectedText, excluding: current.composer)
     let newIds = afterIds.subtracting(beforeMessageIds)

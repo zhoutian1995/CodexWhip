@@ -96,5 +96,6 @@ test('Swift helper performs final identity, focus, draft and delivery checks', (
   assert.match(helper, /func clickComposer\(_ composer: AXUIElement\)/u);
   assert.match(helper, /afterIds\.subtracting\(beforeMessageIds\)/u);
   assert.match(helper, /newIds\.count > 1/u);
+  assert.match(helper, /Codex often rebuilds the composer after Enter/u);
   assert.match(helper, /DELIVERY_UNCONFIRMED/u);
 });
