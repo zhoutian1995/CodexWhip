@@ -64,8 +64,8 @@ const hasSingleInstanceLock = app.requestSingleInstanceLock();
 const STATUS_MESSAGES = Object.freeze({
   APP_NOT_RUNNING: 'Codex Desktop 未启动',
   ACCESSIBILITY_PERMISSION_REQUIRED: '请在 macOS 设置中允许 CodexWhip 使用辅助功能',
-  CODEX_MODE_NOT_FOUND: '当前不是 Codex 模式',
-  COMPOSER_NOT_FOUND: '没有找到 Codex 输入框',
+  CODEX_MODE_NOT_FOUND: '当前窗口没有 Codex 输入框，请先打开一个 Codex 任务，不要停留在新标签页或浏览器页面',
+  COMPOSER_NOT_FOUND: '没有找到 Codex 输入框，请先点开一个 Codex 任务',
   AMBIGUOUS_WINDOWS: '存在多个 Codex 窗口，无法确定目标',
   TARGET_SESSION_REQUIRED: '请先绑定 Codex 任务',
   TARGET_SESSION_MISMATCH: '当前不是已绑定任务，本次未发送',
@@ -389,13 +389,14 @@ async function openPhraseLibrary() {
   if (wasVisible) hideOverlay();
   let error;
   try {
-    error = await shell.openPath(phraseFilePath);
-    if (error && process.platform === 'darwin') {
+    if (process.platform === 'darwin') {
       error = await new Promise(resolve => {
         execFile('/usr/bin/open', ['-a', 'TextEdit', phraseFilePath], cause => {
           resolve(cause?.message || '');
         });
       });
+    } else {
+      error = await shell.openPath(phraseFilePath);
     }
   } catch (cause) {
     error = cause?.message || String(cause);

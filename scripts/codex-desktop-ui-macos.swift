@@ -560,6 +560,14 @@ guard apps.count == 1, let codexApp = apps.first else {
 if arguments.mode == "dump" { dumpTree(app: codexApp) }
 
 var candidates = allCandidates(app: codexApp, targetTitle: arguments.targetTaskTitle)
+if candidates.isEmpty && arguments.mode == "probe" {
+    // Binding is commonly triggered while the overlay sits above another app.
+    // Bring Codex forward once and let its AX tree settle before refusing the
+    // binding; this is read-only and never submits a prompt.
+    _ = activate(codexApp)
+    usleep(240_000)
+    candidates = allCandidates(app: codexApp, targetTitle: arguments.targetTaskTitle)
+}
 guard !candidates.isEmpty else { emit(false, "CODEX_MODE_NOT_FOUND") }
 guard var selected = selectCandidate(candidates, arguments: arguments) else {
     emit(false, "AMBIGUOUS_WINDOWS", ["candidateCount": candidates.count])

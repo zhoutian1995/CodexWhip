@@ -1,8 +1,8 @@
-# CodexWhip 1.5.4 Test Plan
+# CodexWhip 1.5.5 Test Plan
 
 ## Goal
 
-Keep the four whip styles and guarded delivery behavior while restoring compatibility with the current ChatGPT/Codex desktop accessibility trees on macOS and Windows. The 1.5.4 patch also retries frontmost activation and composer focus, and tolerates dynamic AX window identifiers during one guarded send.
+Keep the four whip styles and guarded delivery behavior while restoring compatibility with the current ChatGPT/Codex desktop accessibility trees on macOS and Windows. The 1.5.5 patch also explains when the active window has no Codex composer and opens the macOS phrase library directly in TextEdit.
 
 ## Release Gates
 
@@ -30,8 +30,8 @@ Keep the four whip styles and guarded delivery behavior while restoring compatib
    - README and settings documentation do not advertise `crop`.
 5. Packaging and installation
    - `npm audit --omit=dev` reports zero production vulnerabilities.
-   - `npm run dist:win` creates Setup and Portable executables for version 1.5.4.
-   - The installed application reports version 1.5.4.
+   - `npm run dist:win` creates Setup and Portable executables for version 1.5.5.
+   - The installed application reports version 1.5.5.
    - Existing binding and phrase files keep their original hashes.
    - A previous `crop` setting resolves to the leather whip.
 6. GitHub publication
@@ -45,7 +45,7 @@ Keep the four whip styles and guarded delivery behavior while restoring compatib
 | Source and configuration | Pass | JavaScript tests, Swift helper compilation, `git diff --check`, the current AX fixture, and the mock bound-send flow pass; live Codex probing was intentionally not repeated against the user's active session. |
 | Unit and contract | Pass | `npm test`: 62 tests passed sequentially, including binding→whip→send mocks, phrase-editor recovery, the current AX fixture, and migrated UIA contract tests. |
 | Overlay and performance | Partial | Visual smoke confirms click counts, close controls, four-style activation, viewport rendering, and idle repaint stop; the host's frame cadence exceeded the 34ms smoke threshold for several styles. |
-| Assets and documentation | Pass | Existing four-style assets remain covered; README and test-plan references are aligned with the 1.5.4 package. |
-| Packaging | Pass | `npm run dist:mac` created the 1.5.4 arm64 DMG and ZIP; the installed app reports 1.5.4 and its helper hash matches the build. |
-| Installed application | Partial | The installed 1.5.4 overlay visibly exposes style/action controls and the always-visible send status; real binding/send was not exercised against the user's active Codex session. |
-| GitHub publication | Pass | Commit `dfd603c` containing the guarded focus/dynamic-window-id fix, tests, packaging metadata, and documentation is pushed to `origin/main`. |
+| Assets and documentation | Pass | Existing four-style assets remain covered; README and test-plan references are aligned with the 1.5.5 package. |
+| Packaging | Pass | `npm run dist:mac` created the 1.5.5 arm64 DMG and ZIP; the installed app reports 1.5.5 and its helper hash matches the build. |
+| Installed application | Partial | The installed 1.5.5 overlay visibly exposes style/action controls and the always-visible send status; real binding/send was not exercised against the user's active Codex session. |
+| GitHub publication | Pending | Commit and push the 1.5.5 binding guidance and macOS phrase-editor change. |

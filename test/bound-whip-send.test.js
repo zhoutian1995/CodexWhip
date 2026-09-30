@@ -50,9 +50,10 @@ function loadMain({ probeResult = TARGET, sendResult, phraseOpenError = '' } = {
       }
       if (moduleId === 'node:child_process') {
         return {
-          execFile: (_command, _args, callback) => {
-            events.push('fallback:open');
-            callback(new Error('mock editor unavailable'));
+          execFile: (_command, args, callback) => {
+            events.push(args?.[1] === 'TextEdit' ? 'editor:open' : 'fallback:open');
+            if (args?.[1] === 'TextEdit') opened.push(args[2]);
+            callback(phraseOpenError ? new Error(phraseOpenError) : null);
           },
         };
       }
@@ -164,7 +165,7 @@ test('opening the phrase library hides the full-screen whip before opening the e
 
   const response = await handlers.get('open-phrase-library')();
 
-  assert.deepEqual(events, ['overlay:hide', 'phrases:open']);
+  assert.deepEqual(events, ['overlay:hide', 'editor:open']);
   assert.deepEqual(opened, ['/virtual/codexwhip/phrases.json']);
   assert.equal(overlay.visible, false);
   assert.equal(response.ok, true);
@@ -180,7 +181,7 @@ test('a phrase editor failure restores the previously visible whip without sendi
 
   const response = await handlers.get('open-phrase-library')();
 
-  assert.deepEqual(events, ['overlay:hide', 'phrases:open', 'fallback:open', 'overlay:show']);
+  assert.deepEqual(events, ['overlay:hide', 'editor:open', 'overlay:show']);
   assert.equal(overlay.visible, true);
   assert.equal(response.ok, false);
   assert.equal(response.code, 'PHRASE_LIBRARY_OPEN_FAILED');

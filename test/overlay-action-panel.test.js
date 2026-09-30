@@ -29,4 +29,6 @@ test('preload and main wire the visible action panel to existing desktop actions
   assert.match(main, /overlay\.webContents\.send\('overlay-status'/u);
   assert.match(main, /code:\s*saved\.ok\s*\?\s*'SESSION_BOUND'/u);
   assert.match(main, /code:\s*error\s*\?\s*'PHRASE_LIBRARY_OPEN_FAILED'/u);
+  assert.match(main, /当前窗口没有 Codex 输入框/u);
+  assert.match(main, /execFile\('\/usr\/bin\/open', \['-a', 'TextEdit'/u);
 });
