@@ -1,8 +1,8 @@
-# CodexWhip 1.5.7 Test Plan
+# CodexWhip 1.5.8 Test Plan
 
 ## Goal
 
-Keep the four whip styles and guarded delivery behavior while restoring compatibility with the current ChatGPT/Codex desktop accessibility trees on macOS and Windows. The 1.5.7 patch also accepts Codex's normal post-submit composer rebuild as a successful delivery when a new message runtime id and an empty draft prove the send.
+Keep the four whip styles and guarded delivery behavior while restoring compatibility with the current ChatGPT/Codex desktop accessibility trees on macOS and Windows. The 1.5.8 patch keeps the guarded delivery fix and refreshes the built-in Chinese phrase library with a rougher, exaggerated short-video comedy tone.
 
 ## Release Gates
 
@@ -30,8 +30,8 @@ Keep the four whip styles and guarded delivery behavior while restoring compatib
    - README and settings documentation do not advertise `crop`.
 5. Packaging and installation
    - `npm audit --omit=dev` reports zero production vulnerabilities.
-   - `npm run dist:win` creates Setup and Portable executables for version 1.5.7.
-   - The installed application reports version 1.5.7.
+   - `npm run dist:win` creates Setup and Portable executables for version 1.5.8.
+   - The installed application reports version 1.5.8.
    - Existing binding and phrase files keep their original hashes.
    - A previous `crop` setting resolves to the leather whip.
 6. GitHub publication
@@ -45,7 +45,7 @@ Keep the four whip styles and guarded delivery behavior while restoring compatib
 | Source and configuration | Pass | JavaScript tests, Swift helper compilation, `git diff --check`, the current AX fixture, and the mock bound-send flow pass; the live Codex probe found the current composer through Accessibility hit-testing. |
 | Unit and contract | Pass | `npm test`: 62 tests passed sequentially, including binding→whip→send mocks, phrase-editor recovery, the current AX fixture, and migrated UIA contract tests. |
 | Overlay and performance | Partial | Visual smoke confirms click counts, close controls, four-style activation, viewport rendering, and idle repaint stop; the host's frame cadence exceeded the 34ms smoke threshold for several styles. |
-| Assets and documentation | Pass | Existing four-style assets remain covered; README and test-plan references are aligned with the 1.5.7 package. |
-| Packaging | Pass | `npm run dist:mac` created the 1.5.7 arm64 DMG and ZIP; the installed app reports 1.5.7 and its helper hash matches the build. |
-| Installed application | Pass | The installed app was exercised against the bound `玩具` task: the test message appeared in Codex and the draft cleared. The helper now treats Codex's post-submit composer rebuild as the expected successful path. |
-| GitHub publication | Pass | Commit `d438a81` containing the 1.5.7 helper and hit-testing fix is pushed to `origin/main`. |
+| Assets and documentation | Pass | Existing four-style assets remain covered; README, tests, and test-plan references include the refreshed phrase library and 1.5.8 package. |
+| Packaging | Pass | `npm run dist:mac` created the 1.5.8 arm64 DMG and ZIP; the installed app reports 1.5.8 and its helper hash matches the build. |
+| Installed application | Pass | The running app reloaded 20 updated phrases from the user phrase file, and the freshly installed 1.5.8 app launches with the same phrase file; no real prompt was sent during the phrase update. |
+| GitHub publication | Pending | The 1.5.8 phrase-library update will be committed and pushed after packaging checks pass. |

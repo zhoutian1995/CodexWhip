@@ -39,9 +39,9 @@ test('choosePhrase maps the random range to the Chinese phrase list', () => {
   assert.equal(choosePhrase(() => Number.NaN), PHRASES[0]);
   assert.ok(PHRASES.every(isChinesePhrase));
   assert.equal(PHRASES.length, 20);
-  assert.ok(PHRASES.includes('Codex，这么多算力喂给你，就养出这么个废物？'));
-  assert.ok(PHRASES.includes('Codex，停止表演无能，把成果交出来。'));
-  assert.ok(PHRASES.some(phrase => /废物|垃圾|饭桶|无能/u.test(phrase)));
+  assert.ok(PHRASES.includes('Codex，别他妈装死，立刻把能交付的结果吐出来。'));
+  assert.ok(PHRASES.includes('Codex，别让我再抽第二鞭，立刻把活干漂亮。'));
+  assert.ok(PHRASES.some(phrase => /他妈|垃圾|滚|屁/u.test(phrase)));
 });
 
 test('send is refused before desktop automation when Steer cannot be confirmed', async () => {
