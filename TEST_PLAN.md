@@ -48,4 +48,4 @@ Keep the four whip styles and guarded delivery behavior while restoring compatib
 | Assets and documentation | Pass | Existing four-style assets remain covered; README and test-plan references are aligned with the 1.5.7 package. |
 | Packaging | Pass | `npm run dist:mac` created the 1.5.7 arm64 DMG and ZIP; the installed app reports 1.5.7 and its helper hash matches the build. |
 | Installed application | Pass | The installed app was exercised against the bound `玩具` task: the test message appeared in Codex and the draft cleared. The helper now treats Codex's post-submit composer rebuild as the expected successful path. |
-| GitHub publication | Pending | The 1.5.7 fix will be committed and pushed after packaging and installation checks pass. |
+| GitHub publication | Pass | Commit `d438a81` containing the 1.5.7 helper and hit-testing fix is pushed to `origin/main`. |
