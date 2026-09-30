@@ -76,4 +76,10 @@ test('macOS helper keeps semantic fallbacks for the current AX shape', () => {
   assert.match(helper, /AXTextAreaRole/u);
   assert.match(helper, /消息/u);
   assert.match(helper, /taskTitleMatchCount/u);
+  assert.match(helper, /func sameTask\(_ candidate: CodexCandidate, as task: TaskIdentity\?\)/u);
+  assert.match(helper, /func candidateForTask\(_ candidates: \[CodexCandidate\]/u);
+  assert.match(helper, /activateIgnoringOtherApps/u);
+  assert.match(helper, /func raiseWindow\(_ window: AXUIElement\)/u);
+  assert.match(helper, /for _ in 0\.\.<6/u);
+  assert.match(helper, /candidateForTask\(currentCandidates, windowId: initialWindowId/u);
 });

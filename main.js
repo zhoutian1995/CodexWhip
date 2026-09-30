@@ -530,7 +530,9 @@ async function lowerOverlayForDesktopSend() {
   if (!isOverlayVisible()) return;
   overlay.setIgnoreMouseEvents(true);
   overlay.setAlwaysOnTop(false);
-  await new Promise(resolve => setTimeout(resolve, 80));
+  // Give macOS enough time to hand frontmost focus back to Codex before the
+  // accessibility helper raises the bound window and focuses its composer.
+  await new Promise(resolve => setTimeout(resolve, 180));
 }
 
 function restoreOverlayAfterDesktopSend() {

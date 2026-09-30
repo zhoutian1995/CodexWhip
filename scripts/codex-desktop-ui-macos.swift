@@ -412,6 +412,16 @@ func selectCandidate(_ candidates: [CodexCandidate], arguments: Arguments) -> Co
     return candidates.count == 1 ? candidates[0] : nil
 }
 
+func sameTask(_ candidate: CodexCandidate, as task: TaskIdentity?) -> Bool {
+    guard let expected = task, let current = candidate.task else { return false }
+    return current.runtimeId == expected.runtimeId || current.title == expected.title
+}
+
+func candidateForTask(_ candidates: [CodexCandidate], windowId: String, task: TaskIdentity?) -> CodexCandidate? {
+    candidates.first(where: { $0.windowId == windowId }) ??
+        candidates.first(where: { sameTask($0, as: task) })
+}
+
 func verifyIdentity(_ candidate: CodexCandidate, arguments: Arguments) {
     guard let task = candidate.task else {
         emit(false, "TASK_ID_NOT_FOUND", ["hwnd": candidate.windowId, "processId": candidate.app.processIdentifier])
@@ -429,18 +439,33 @@ func verifyIdentity(_ candidate: CodexCandidate, arguments: Arguments) {
 
 func activate(_ app: NSRunningApplication) -> Bool {
     if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == codexBundleIdentifier { return true }
-    _ = app.activate(options: [])
-    usleep(140_000)
-    return NSWorkspace.shared.frontmostApplication?.bundleIdentifier == codexBundleIdentifier
+    _ = app.activate(options: [.activateIgnoringOtherApps, .activateAllWindows])
+    for _ in 0..<20 {
+        usleep(60_000)
+        if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == codexBundleIdentifier {
+            return true
+        }
+    }
+    return false
+}
+
+func raiseWindow(_ window: AXUIElement) {
+    _ = AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+    _ = AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
+    _ = AXUIElementSetAttributeValue(window, kAXFocusedAttribute as CFString, kCFBooleanTrue)
 }
 
 func focusComposer(_ composer: AXUIElement) -> Bool {
-    let error = AXUIElementSetAttributeValue(composer, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-    if error != .success { return false }
-    usleep(50_000)
-    let system = AXUIElementCreateSystemWide()
-    guard let focused = elementAttribute(system, kAXFocusedUIElementAttribute) else { return false }
-    return isDescendant(focused, of: composer)
+    for _ in 0..<6 {
+        _ = AXUIElementSetAttributeValue(composer, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        usleep(80_000)
+        let system = AXUIElementCreateSystemWide()
+        if let focused = elementAttribute(system, kAXFocusedUIElementAttribute),
+           isDescendant(focused, of: composer) {
+            return true
+        }
+    }
+    return false
 }
 
 func setComposerText(_ text: String, composer: AXUIElement, pid: pid_t) -> String? {
@@ -576,9 +601,13 @@ let beforeMessageIds = matchingTextRuntimeIds(
 guard activate(codexApp) else {
     emit(false, "TARGET_WINDOW_NOT_ACTIVE", ["hwnd": initialWindowId])
 }
+raiseWindow(selected.window)
+usleep(120_000)
 
 candidates = allCandidates(app: codexApp, targetTitle: arguments.targetTaskTitle)
-guard let activated = candidates.first(where: { $0.windowId == initialWindowId }) ?? selectCandidate(candidates, arguments: arguments) else {
+guard let activated = candidates.first(where: { $0.windowId == initialWindowId }) ??
+    candidates.first(where: { sameTask($0, as: selected.task) }) ??
+    selectCandidate(candidates, arguments: arguments) else {
     emit(false, "TARGET_WINDOW_NOT_ACTIVE", ["hwnd": initialWindowId])
 }
 selected = activated
@@ -602,7 +631,7 @@ guard let inputMethod = setComposerText(
 usleep(100_000)
 
 candidates = allCandidates(app: codexApp, targetTitle: arguments.targetTaskTitle)
-guard let beforeSubmit = candidates.first(where: { $0.windowId == initialWindowId }) else {
+guard let beforeSubmit = candidateForTask(candidates, windowId: initialWindowId, task: selected.task) else {
     emit(false, "TARGET_WINDOW_NOT_ACTIVE", ["hwnd": initialWindowId])
 }
 verifyIdentity(beforeSubmit, arguments: arguments)
@@ -612,7 +641,7 @@ guard beforeSubmit.composerRuntimeId == initialComposerRuntimeId else {
 guard composerText(beforeSubmit.composer) == arguments.expectedText else {
     emit(false, "DRAFT_CHANGED", ["hwnd": beforeSubmit.windowId])
 }
-guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier == codexBundleIdentifier,
+guard activate(codexApp),
       focusComposer(beforeSubmit.composer) else {
     emit(false, "FOCUS_FAILED", ["hwnd": beforeSubmit.windowId])
 }
@@ -624,7 +653,7 @@ var finalDraft = arguments.expectedText
 for _ in 0..<25 {
     usleep(100_000)
     let currentCandidates = allCandidates(app: codexApp, targetTitle: arguments.targetTaskTitle)
-    guard let current = currentCandidates.first(where: { $0.windowId == initialWindowId }) else { continue }
+    guard let current = candidateForTask(currentCandidates, windowId: initialWindowId, task: selected.task) else { continue }
     verifyIdentity(current, arguments: arguments)
     if current.composerRuntimeId != initialComposerRuntimeId {
         emit(false, "COMPOSER_CHANGED", ["hwnd": current.windowId])
