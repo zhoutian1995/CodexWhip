@@ -176,13 +176,19 @@ func classText(_ element: AXUIElement) -> String {
         .lowercased()
 }
 
+func hasClassToken(_ classes: String, _ token: String) -> Bool {
+    let expected = token.lowercased()
+    return classes.split(whereSeparator: { $0.isWhitespace })
+        .contains { String($0).lowercased() == expected }
+}
+
 func isPlaceholder(_ value: String) -> Bool {
     let text = normalized(value).lowercased()
     if text.isEmpty { return true }
     let prefixes = [
         "describe your task", "message codex", "ask codex", "what do you want",
         "work with chatgpt", "work with codex", "send a message",
-        "描述你的任务", "与 chatgpt 协作", "与 codex 协作", "随心输入"
+        "描述你的任务", "与 chatgpt 协作", "与 codex 协作", "随心输入", "消息"
     ]
     return prefixes.contains { text.hasPrefix($0) }
 }
@@ -215,7 +221,7 @@ func findComposer(in nodes: [AXUIElement], windowFrame: FrameInfo?) -> AXUIEleme
         let classMatches = classes.contains("prosemirror")
         let promptMatches = name.contains("message codex") || name.contains("ask codex") ||
             name.contains("describe your task") || name.contains("描述你的任务") ||
-            name.contains("与 codex 协作")
+            name.contains("与 codex 协作") || name.contains("消息")
         if !classMatches && !(roleMatches && promptMatches) { continue }
         if boolAttribute(element, kAXHiddenAttribute) || !boolAttribute(element, kAXEnabledAttribute) && roleMatches { continue }
         if let frame, (frame.width < 20 || frame.height < 20) { continue }
@@ -290,7 +296,11 @@ func findTask(in nodes: [AXUIElement], windowFrame: FrameInfo?) -> TaskIdentity?
         // variant is currently included in every sidebar row's class list;
         // it becomes a reliable signal only when AX also reports selected.
         let selectedMarker = classes.contains("data-[app-action-sidebar-thread-selected=true]")
-        let activeClass = classes.contains("bg-token-list-hover-background") ||
+        // Match the complete utility token. `contains` would also match the
+        // variant token (`data-[...]:bg-primary-ghost-hover`) that is present
+        // on every row in the current ChatGPT shell.
+        let activeClass = hasClassToken(classes, "bg-token-list-hover-background") ||
+            hasClassToken(classes, "bg-primary-ghost-hover") ||
             (selectedMarker && selected)
         let sidebarClass = classes.contains("sidebar-item")
         let documentTitleMatch = documentTitles.contains(title)
@@ -349,7 +359,15 @@ func analyzeWindow(_ window: AXUIElement, app: NSRunningApplication, targetTitle
         let name = "\(elementName($0)) \(stringAttribute($0, kAXValueAttribute))".lowercased()
         return name == "codex" || name.contains("codex")
     }
-    if !hasCodexDocument && !classText(composer).contains("prosemirror") { return nil }
+    // Recent Codex builds expose the conversation as a localized AXWebArea
+    // (for example “你的 dot”) rather than a document named “Codex”. The
+    // composer is still a strong identity signal, including when it is a
+    // plain AXTextArea named “消息” without the old prosemirror class.
+    let composerPlaceholder = stringAttribute(composer, "AXPlaceholderValue")
+    let composerIdentityText = "\(elementName(composer)) \(composerPlaceholder)".lowercased()
+    let composerLooksLikeCodex = classText(composer).contains("prosemirror") ||
+        composerIdentityText.contains("消息")
+    if !hasCodexDocument && !composerLooksLikeCodex { return nil }
 
     let task = findTask(in: nodes, windowFrame: frameOf(window))
     let titleForCount = targetTitle.isEmpty ? (task?.title ?? "") : targetTitle

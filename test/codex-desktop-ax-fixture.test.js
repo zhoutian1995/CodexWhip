@@ -53,6 +53,7 @@ test('current AX fixture models the post-migration task and composer contract', 
   assert.equal(documentMatches[0].name, '示例任务');
   assert.equal(documentMatches[0].selected, false);
   assert.doesNotMatch(documentMatches[0].classes, /bg-token-list-hover-background/u);
+  assert.match(documentMatches[0].classes, /(?:^|\s)bg-primary-ghost-hover(?:\s|$)/u);
   assert.match(documentMatches[0].classes, /data-\[app-action-sidebar-thread-selected=true\]/u);
 
   // The selected AXRadioButton is an app shell tab, not a Codex task.
@@ -66,7 +67,11 @@ test('macOS helper keeps semantic fallbacks for the current AX shape', () => {
   assert.match(helper, /AXWebArea/u);
   assert.match(helper, /activeDocumentTitles/u);
   assert.match(helper, /app-action-sidebar-thread-selected/u);
+  assert.match(helper, /func hasClassToken/u);
+  assert.match(helper, /hasClassToken\(classes, "bg-token-list-hover-background"\)/u);
+  assert.match(helper, /hasClassToken\(classes, "bg-primary-ghost-hover"\)/u);
   assert.match(helper, /sidebar-item/u);
   assert.match(helper, /AXTextAreaRole/u);
+  assert.match(helper, /消息/u);
   assert.match(helper, /taskTitleMatchCount/u);
 });

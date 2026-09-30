@@ -118,6 +118,83 @@
     color: rgba(255, 216, 220, 0.56);
     font-size: 11px;
   }
+
+  #actionPanel {
+    position: fixed;
+    z-index: 10;
+    top: calc(50% + 30px);
+    right: 18px;
+    width: 230px;
+    color: rgba(255, 244, 246, 0.94);
+    font: 13px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    pointer-events: auto;
+    user-select: none;
+  }
+
+  #actionPanel button {
+    border: 1px solid rgba(255, 92, 111, 0.36);
+    border-radius: 9px;
+    color: inherit;
+    background: rgba(18, 8, 12, 0.84);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.26), 0 0 18px rgba(178, 24, 43, 0.12);
+    cursor: pointer;
+    font: inherit;
+  }
+
+  #actionPanelToggle {
+    min-height: 31px;
+    padding: 6px 11px;
+    float: right;
+    transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+  }
+
+  #actionPanelToggle:hover,
+  #actionPanelToggle:focus-visible {
+    background: rgba(38, 11, 18, 0.92);
+    border-color: rgba(255, 105, 122, 0.82);
+    outline: none;
+    transform: translateX(-2px);
+  }
+
+  #actionPanelMenu {
+    display: none;
+    clear: both;
+    padding: 8px;
+    border: 1px solid rgba(255, 92, 111, 0.34);
+    border-radius: 12px;
+    background: rgba(16, 8, 12, 0.94);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.36), 0 0 24px rgba(178, 24, 43, 0.16);
+    backdrop-filter: blur(10px);
+  }
+  #actionPanel.isOpen #actionPanelMenu { display: grid; gap: 5px; }
+  #actionPanelMenu button {
+    width: 100%;
+    padding: 8px 10px;
+    text-align: left;
+    transition: background 100ms ease, border-color 100ms ease;
+  }
+  #actionPanelMenu button:hover,
+  #actionPanelMenu button:focus-visible {
+    background: rgba(178, 24, 43, 0.22);
+    border-color: rgba(255, 92, 111, 0.58);
+    outline: none;
+  }
+  #actionPanelMenu button[aria-busy="true"] { opacity: 0.58; }
+  .actionPanelHint {
+    padding: 1px 3px 3px;
+    color: rgba(255, 216, 220, 0.64);
+    font-size: 11px;
+  }
+  #actionPanelStatus {
+    min-height: 30px;
+    padding: 6px 8px 2px;
+    color: rgba(255, 216, 220, 0.76);
+    font-size: 11px;
+    overflow-wrap: anywhere;
+  }
+  #actionPanelStatus[data-tone="success"] { color: #8ee6b1; }
+  #actionPanelStatus[data-tone="error"] { color: #ffabb4; }
+  #actionPanelStatus[data-tone="pending"] { color: #ffd27d; }
 </style>
 </head>
 <body>
@@ -134,6 +211,16 @@
     <button type="button" role="radio" aria-checked="false" data-style-id="cyber"><span class="styleSwitcherCheck"> </span>赛博高压电缆鞭</button>
     <button type="button" role="radio" aria-checked="false" data-style-id="random"><span class="styleSwitcherCheck"> </span>随机轮换</button>
     <div class="styleSwitcherHint">点击鞭子外部继续挥动</div>
+  </div>
+</div>
+<div id="actionPanel" aria-label="鞭子操作台">
+  <button id="actionPanelToggle" type="button" aria-expanded="false" aria-controls="actionPanelMenu">🎬 操作台</button>
+  <div id="actionPanelMenu">
+    <div class="actionPanelHint">这里可以直接检查 Codex 绑定和词库</div>
+    <button type="button" data-action="bind" aria-busy="false">🔗 绑定当前会话</button>
+    <button type="button" data-action="test" aria-busy="false">🧪 测试当前绑定</button>
+    <button type="button" data-action="phrases" aria-busy="false">📖 打开中文词库</button>
+    <div id="actionPanelStatus" role="status" aria-live="polite">状态：未绑定任务</div>
   </div>
 </div>
 <canvas id="c"></canvas>
@@ -228,6 +315,87 @@ const styleSwitcherButtons = [...styleSwitcherMenu.querySelectorAll('[data-style
 let selectedStyleChoice = 'leather';
 let styleSwitcherPulseTimer = null;
 
+const actionPanel = document.getElementById('actionPanel');
+const actionPanelToggle = document.getElementById('actionPanelToggle');
+const actionPanelMenu = document.getElementById('actionPanelMenu');
+const actionPanelStatus = document.getElementById('actionPanelStatus');
+const actionButtons = [...actionPanelMenu.querySelectorAll('[data-action]')];
+const ACTION_BRIDGE_METHODS = Object.freeze({
+  bind: 'bindCurrentSession',
+  test: 'testCodexConnection',
+  phrases: 'openPhraseLibrary',
+});
+
+function setActionPanelStatus(payload, tone = '') {
+  const status = typeof payload === 'string' ? payload : payload?.status || payload?.message;
+  if (!status) return;
+  actionPanelStatus.textContent = `状态：${status}`;
+  actionPanelStatus.dataset.tone = tone || (payload?.ok === false ? 'error' : payload?.ok ? 'success' : '');
+  if (payload?.bound && payload.taskTitle) {
+    actionPanelStatus.title = `当前绑定：${payload.taskTitle}`;
+  } else if (!payload?.bound) {
+    actionPanelStatus.removeAttribute('title');
+  }
+}
+
+function closeActionPanel() {
+  actionPanel.classList.remove('isOpen');
+  actionPanelToggle.setAttribute('aria-expanded', 'false');
+}
+
+function toggleActionPanel() {
+  const open = !actionPanel.classList.contains('isOpen');
+  actionPanel.classList.toggle('isOpen', open);
+  actionPanelToggle.setAttribute('aria-expanded', String(open));
+}
+
+function runAction(actionButton) {
+  const action = actionButton.dataset.action;
+  const methodName = ACTION_BRIDGE_METHODS[action];
+  const method = methodName && window.bridge?.[methodName];
+  if (typeof method !== 'function') {
+    setActionPanelStatus('当前版本未提供这个操作', 'error');
+    return;
+  }
+
+  actionButtons.forEach(button => button.setAttribute('aria-busy', String(button === actionButton)));
+  setActionPanelStatus('正在处理…', 'pending');
+  let request;
+  try {
+    request = method();
+  } catch (error) {
+    setActionPanelStatus(`操作失败：${error?.message || error}`, 'error');
+    actionButtons.forEach(button => button.setAttribute('aria-busy', 'false'));
+    return;
+  }
+  Promise.resolve(request).then(result => {
+    if (result?.message) setActionPanelStatus(result, result.ok ? 'success' : 'error');
+  }).catch(error => {
+    setActionPanelStatus(`操作失败：${error?.message || error}`, 'error');
+  }).finally(() => {
+    actionButtons.forEach(button => button.setAttribute('aria-busy', 'false'));
+  });
+}
+
+actionPanelToggle.addEventListener('click', event => {
+  event.stopPropagation();
+  toggleActionPanel();
+});
+actionPanelToggle.addEventListener('mousedown', event => event.stopPropagation());
+actionPanelMenu.addEventListener('mousedown', event => event.stopPropagation());
+actionPanelMenu.addEventListener('click', event => {
+  event.stopPropagation();
+  const button = event.target.closest('[data-action]');
+  if (button && button.getAttribute('aria-busy') !== 'true') runAction(button);
+});
+actionPanelToggle.addEventListener('keydown', event => {
+  if (event.key === 'Escape') {
+    closeActionPanel();
+    event.stopPropagation();
+  }
+});
+window.bridge.onOverlayStatus(setActionPanelStatus);
+
 function pulseStyleSwitcher() {
   styleSwitcher.classList.remove('isPulse');
   // Force a new animation cycle when two style changes happen quickly.
@@ -296,6 +464,7 @@ styleSwitcherToggle.addEventListener('keydown', event => {
 });
 window.addEventListener('mousedown', event => {
   if (!styleSwitcher.contains(event.target)) closeStyleSwitcher();
+  if (!actionPanel.contains(event.target)) closeActionPanel();
 });
 
 function ensureStyleAudio(style) {

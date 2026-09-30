@@ -238,6 +238,13 @@ function setTrayStatus(status) {
   trayStatus = status;
   console.log(`codexwhip: status: ${status}`);
   refreshTrayMenu();
+  if (isOverlayUsable() && overlayReady) {
+    overlay.webContents.send('overlay-status', {
+      status: trayStatus,
+      bound: Boolean(boundSession),
+      taskTitle: boundSession?.taskTitle || '',
+    });
+  }
 }
 
 function stylePayload({ respawn = false } = {}) {
@@ -281,19 +288,28 @@ function sessionFromProbe(result) {
 async function bindCurrentSession() {
   const result = await probeCodexDesktop();
   if (!result.ok) {
-    setTrayStatus(`绑定失败：${statusForResult(result)}`);
-    return;
+    const message = `绑定失败：${statusForResult(result)}`;
+    setTrayStatus(message);
+    return { ok: false, code: result.code || 'BINDING_FAILED', message };
   }
   if (!result.taskTitle || !result.taskRuntimeId) {
-    setTrayStatus('绑定失败：无法识别当前 Codex 任务');
-    return;
+    const message = '绑定失败：无法识别当前 Codex 任务';
+    setTrayStatus(message);
+    return { ok: false, code: 'TASK_ID_NOT_FOUND', message };
   }
 
   boundSession = sessionFromProbe(result);
   const saved = saveBinding(bindingFilePath, result.taskTitle);
-  setTrayStatus(saved.ok
+  const message = saved.ok
     ? `已绑定：${result.taskTitle}`
-    : `已绑定，但保存失败：${result.taskTitle}`);
+    : `已绑定，但保存失败：${result.taskTitle}`;
+  setTrayStatus(message);
+  return {
+    ok: saved.ok,
+    code: saved.ok ? 'SESSION_BOUND' : 'SESSION_BOUND_NOT_SAVED',
+    taskTitle: result.taskTitle,
+    message,
+  };
 }
 
 function clearBoundSession() {
@@ -322,8 +338,9 @@ async function restoreSavedSession() {
 
 async function testCodexConnection() {
   if (!boundSession) {
-    setTrayStatus('请先绑定 Codex 任务');
-    return;
+    const message = '请先绑定 Codex 任务';
+    setTrayStatus(message);
+    return { ok: false, code: 'TARGET_SESSION_REQUIRED', message };
   }
 
   const result = await probeCodexDesktop({
@@ -332,13 +349,21 @@ async function testCodexConnection() {
     targetTaskRuntimeId: boundSession.taskRuntimeId,
   });
   if (!result.ok) {
-    setTrayStatus(`连接失败：${statusForResult(result)}`);
-    return;
+    const message = `连接失败：${statusForResult(result)}`;
+    setTrayStatus(message);
+    return { ok: false, code: result.code || 'CONNECTION_FAILED', message };
   }
 
   boundSession.hwnd = result.hwnd;
   boundSession.processId = result.processId;
-  setTrayStatus(result.hasDraft ? '连接正常，但目标任务有草稿' : '连接正常，可以连续抽打');
+  const message = result.hasDraft ? '连接正常，但目标任务有草稿' : '连接正常，可以连续抽打';
+  setTrayStatus(message);
+  return {
+    ok: true,
+    code: result.hasDraft ? 'CONNECTION_READY_WITH_DRAFT' : 'CONNECTION_READY',
+    hasDraft: Boolean(result.hasDraft),
+    message,
+  };
 }
 
 function initializePhraseLibrary() {
@@ -358,7 +383,14 @@ function initializePhraseLibrary() {
 
 async function openPhraseLibrary() {
   const error = await shell.openPath(phraseFilePath);
-  setTrayStatus(error ? `打开词库失败：${error}` : '已打开中文催促词库');
+  const message = error ? `打开词库失败：${error}` : '已打开中文催促词库';
+  setTrayStatus(message);
+  return {
+    ok: !error,
+    code: error ? 'PHRASE_LIBRARY_OPEN_FAILED' : 'PHRASE_LIBRARY_OPENED',
+    path: phraseFilePath,
+    message,
+  };
 }
 
 function reloadPhraseLibrary() {
@@ -391,6 +423,11 @@ function createOverlay() {
   overlayReady = false;
   overlay.webContents.on('did-finish-load', () => {
     overlayReady = true;
+    overlay.webContents.send('overlay-status', {
+      status: trayStatus,
+      bound: Boolean(boundSession),
+      taskTitle: boundSession?.taskTitle || '',
+    });
     if (spawnQueued && isOverlayVisible()) {
       spawnQueued = false;
       overlay.webContents.send('spawn-whip', stylePayload());
@@ -534,6 +571,9 @@ async function performWhipSend() {
 
 ipcMain.handle('whip-crack', () => getWhipSendScheduler().request());
 ipcMain.handle('select-whip-style', (_event, styleId) => selectWhipStyle(styleId));
+ipcMain.handle('bind-current-session', () => bindCurrentSession());
+ipcMain.handle('test-codex-connection', () => testCodexConnection());
+ipcMain.handle('open-phrase-library', () => openPhraseLibrary());
 
 ipcMain.on('hide-overlay', hideOverlay);
 

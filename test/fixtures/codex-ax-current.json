@@ -20,7 +20,7 @@
     {
       "role": "AXButton",
       "name": "示例任务",
-      "classes": "group relative cursor-interaction sidebar-item data-[app-action-sidebar-thread-selected=true]:bg-primary-ghost-hover",
+      "classes": "group relative cursor-interaction sidebar-item bg-primary-ghost-hover data-[app-action-sidebar-thread-selected=true]:bg-primary-ghost-hover",
       "selected": false,
       "focused": false,
       "frame": { "x": 60, "y": 321, "width": 297, "height": 30 },
