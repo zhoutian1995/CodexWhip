@@ -48,4 +48,4 @@ Keep the four whip styles and guarded delivery behavior while restoring compatib
 | Assets and documentation | Pass | Existing four-style assets remain covered; README, tests, and test-plan references include the refreshed phrase library and 1.5.8 package. |
 | Packaging | Pass | `npm run dist:mac` created the 1.5.8 arm64 DMG and ZIP; the installed app reports 1.5.8 and its helper hash matches the build. |
 | Installed application | Pass | The running app reloaded 20 updated phrases from the user phrase file, and the freshly installed 1.5.8 app launches with the same phrase file; no real prompt was sent during the phrase update. |
-| GitHub publication | Pending | The 1.5.8 phrase-library update will be committed and pushed after packaging checks pass. |
+| GitHub publication | Pass | Commit `71cee82` containing the 1.5.8 phrase-library refresh is pushed to `origin/main`. |
