@@ -244,6 +244,8 @@ function stylePayload({ respawn = false } = {}) {
   return {
     styleId: activeWhipStyle,
     style: WHIP_STYLES[activeWhipStyle],
+    selectedStyleId: selectedWhipStyle,
+    styleCatalog: getStyleCatalog().map(style => ({ id: style.id, label: style.label })),
     respawn,
   };
 }
@@ -258,6 +260,13 @@ function selectWhipStyle(styleId) {
   setTrayStatus(saved.ok
     ? `已切换：${WHIP_STYLES[activeWhipStyle].label}`
     : `款式已切换，但保存失败：${WHIP_STYLES[activeWhipStyle].label}`);
+  return {
+    ok: saved.ok,
+    styleId: activeWhipStyle,
+    selectedStyleId: selectedWhipStyle,
+    label: WHIP_STYLES[activeWhipStyle].label,
+    code: saved.ok ? 'STYLE_CHANGED' : 'STYLE_CHANGED_NOT_SAVED',
+  };
 }
 
 function sessionFromProbe(result) {
@@ -524,6 +533,7 @@ async function performWhipSend() {
 }
 
 ipcMain.handle('whip-crack', () => getWhipSendScheduler().request());
+ipcMain.handle('select-whip-style', (_event, styleId) => selectWhipStyle(styleId));
 
 ipcMain.on('hide-overlay', hideOverlay);
 

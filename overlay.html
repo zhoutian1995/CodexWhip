@@ -7,9 +7,135 @@
   * { margin: 0; padding: 0; cursor: none; }
   html, body { overflow: hidden; background: transparent; width: 100%; height: 100%; }
   canvas { display: block; }
+
+  /* The overlay is intentionally click-through everywhere except this small
+     control. It keeps style switching discoverable without competing with
+     the whip animation. */
+  #styleSwitcher {
+    position: fixed;
+    z-index: 10;
+    top: 50%;
+    right: 18px;
+    transform: translateY(-50%);
+    color: rgba(255, 244, 246, 0.94);
+    font: 13px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    pointer-events: auto;
+    cursor: default;
+    user-select: none;
+  }
+
+  #styleSwitcher button {
+    border: 1px solid rgba(255, 92, 111, 0.44);
+    border-radius: 999px;
+    color: inherit;
+    background: rgba(18, 8, 12, 0.78);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.26), 0 0 18px rgba(178, 24, 43, 0.16);
+    cursor: pointer;
+    font: inherit;
+  }
+
+  #styleSwitcherToggle {
+    min-height: 34px;
+    max-width: 240px;
+    padding: 7px 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+  }
+
+  #styleSwitcherToggle:hover,
+  #styleSwitcherToggle:focus-visible {
+    background: rgba(38, 11, 18, 0.92);
+    border-color: rgba(255, 105, 122, 0.82);
+    outline: none;
+    transform: translateX(-2px);
+  }
+
+  #styleSwitcherToggle .styleSwitcherIcon { font-size: 15px; }
+  #styleSwitcherToggle .styleSwitcherLabel {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  #styleSwitcherToggle .styleSwitcherChevron {
+    color: rgba(255, 190, 198, 0.84);
+    font-size: 11px;
+    transition: transform 120ms ease;
+  }
+  #styleSwitcher.isOpen .styleSwitcherChevron { transform: rotate(180deg); }
+  #styleSwitcher.isOpen #styleSwitcherToggle { transform: translateX(-2px); }
+  #styleSwitcher.isPulse #styleSwitcherToggle {
+    animation: styleSwitcherPulse 460ms ease-out;
+  }
+  @keyframes styleSwitcherPulse {
+    0% { box-shadow: 0 8px 24px rgba(0, 0, 0, 0.26), 0 0 0 rgba(255, 83, 103, 0); }
+    38% { box-shadow: 0 8px 28px rgba(0, 0, 0, 0.34), 0 0 30px rgba(255, 83, 103, 0.74); }
+    100% { box-shadow: 0 8px 24px rgba(0, 0, 0, 0.26), 0 0 18px rgba(178, 24, 43, 0.16); }
+  }
+
+  #styleSwitcherMenu {
+    display: none;
+    position: absolute;
+    top: calc(100% + 7px);
+    right: 0;
+    width: 206px;
+    padding: 6px;
+    border: 1px solid rgba(255, 92, 111, 0.34);
+    border-radius: 12px;
+    background: rgba(16, 8, 12, 0.93);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.36), 0 0 24px rgba(178, 24, 43, 0.16);
+    backdrop-filter: blur(10px);
+  }
+  #styleSwitcher.isOpen #styleSwitcherMenu { display: grid; gap: 3px; }
+  #styleSwitcherMenu button {
+    width: 100%;
+    padding: 8px 10px;
+    border-color: transparent;
+    border-radius: 8px;
+    background: transparent;
+    text-align: left;
+    transition: background 100ms ease, border-color 100ms ease;
+  }
+  #styleSwitcherMenu button:hover,
+  #styleSwitcherMenu button:focus-visible {
+    background: rgba(178, 24, 43, 0.22);
+    border-color: rgba(255, 92, 111, 0.35);
+    outline: none;
+  }
+  #styleSwitcherMenu button[aria-checked="true"] {
+    color: #ffb3bb;
+    background: rgba(178, 24, 43, 0.19);
+  }
+  #styleSwitcherMenu button[aria-busy="true"] { opacity: 0.6; }
+  .styleSwitcherCheck {
+    display: inline-block;
+    width: 16px;
+    color: #ff6677;
+  }
+  .styleSwitcherHint {
+    padding: 5px 9px 3px;
+    color: rgba(255, 216, 220, 0.56);
+    font-size: 11px;
+  }
 </style>
 </head>
 <body>
+<div id="styleSwitcher" aria-label="鞭子款式切换">
+  <button id="styleSwitcherToggle" type="button" aria-expanded="false" aria-controls="styleSwitcherMenu">
+    <span class="styleSwitcherIcon" aria-hidden="true">⚡</span>
+    <span class="styleSwitcherLabel">鞭子：黑红长皮鞭</span>
+    <span class="styleSwitcherChevron" aria-hidden="true">▼</span>
+  </button>
+  <div id="styleSwitcherMenu" role="radiogroup" aria-label="选择鞭子款式">
+    <button type="button" role="radio" aria-checked="true" data-style-id="leather"><span class="styleSwitcherCheck">✓</span>黑红长皮鞭</button>
+    <button type="button" role="radio" aria-checked="false" data-style-id="flogger"><span class="styleSwitcherCheck"> </span>七尾多尾鞭</button>
+    <button type="button" role="radio" aria-checked="false" data-style-id="chain"><span class="styleSwitcherCheck"> </span>银黑锁链鞭</button>
+    <button type="button" role="radio" aria-checked="false" data-style-id="cyber"><span class="styleSwitcherCheck"> </span>赛博高压电缆鞭</button>
+    <button type="button" role="radio" aria-checked="false" data-style-id="random"><span class="styleSwitcherCheck"> </span>随机轮换</button>
+    <div class="styleSwitcherHint">点击鞭子外部继续挥动</div>
+  </div>
+</div>
 <canvas id="c"></canvas>
 <script>
 
@@ -86,6 +212,91 @@ const SOUND_PROFILES = Object.freeze({
   cyber: { rate: 1.06, volume: 0.95 },
 });
 const AUDIO_BY_STYLE = new Map();
+const STYLE_LABELS = Object.freeze({
+  leather: '黑红长皮鞭',
+  flogger: '七尾多尾鞭',
+  chain: '银黑锁链鞭',
+  cyber: '赛博高压电缆鞭',
+  random: '随机轮换',
+});
+
+const styleSwitcher = document.getElementById('styleSwitcher');
+const styleSwitcherToggle = document.getElementById('styleSwitcherToggle');
+const styleSwitcherLabel = styleSwitcherToggle.querySelector('.styleSwitcherLabel');
+const styleSwitcherMenu = document.getElementById('styleSwitcherMenu');
+const styleSwitcherButtons = [...styleSwitcherMenu.querySelectorAll('[data-style-id]')];
+let selectedStyleChoice = 'leather';
+let styleSwitcherPulseTimer = null;
+
+function pulseStyleSwitcher() {
+  styleSwitcher.classList.remove('isPulse');
+  // Force a new animation cycle when two style changes happen quickly.
+  void styleSwitcher.offsetWidth;
+  styleSwitcher.classList.add('isPulse');
+  clearTimeout(styleSwitcherPulseTimer);
+  styleSwitcherPulseTimer = setTimeout(() => styleSwitcher.classList.remove('isPulse'), 520);
+}
+
+function updateStyleSwitcher(styleId, selectedStyleId = styleId, { pending = false, pulse = false } = {}) {
+  const resolvedLabel = STYLE_LABELS[styleId] || STYLE_LABELS.leather;
+  const selectedLabel = STYLE_LABELS[selectedStyleId] || resolvedLabel;
+  selectedStyleChoice = selectedStyleId;
+  const label = selectedStyleId === 'random'
+    ? `随机轮换 · ${resolvedLabel}`
+    : selectedLabel;
+  styleSwitcherLabel.textContent = `鞭子：${pending ? '切换中…' : label}`;
+  styleSwitcherToggle.title = pending ? '正在切换鞭子款式' : `当前款式：${label}，点击切换`;
+  styleSwitcher.dataset.styleId = styleId;
+  styleSwitcher.dataset.selectedStyleId = selectedStyleId;
+  styleSwitcherButtons.forEach(button => {
+    const selected = button.dataset.styleId === selectedStyleId && !pending;
+    button.setAttribute('aria-checked', String(selected));
+    button.setAttribute('aria-busy', String(pending && button.dataset.styleId === styleId));
+    const check = button.querySelector('.styleSwitcherCheck');
+    if (check) check.textContent = selected ? '✓' : ' ';
+  });
+  if (pulse) pulseStyleSwitcher();
+}
+
+function closeStyleSwitcher() {
+  styleSwitcher.classList.remove('isOpen');
+  styleSwitcherToggle.setAttribute('aria-expanded', 'false');
+}
+
+function toggleStyleSwitcher() {
+  const open = !styleSwitcher.classList.contains('isOpen');
+  styleSwitcher.classList.toggle('isOpen', open);
+  styleSwitcherToggle.setAttribute('aria-expanded', String(open));
+}
+
+styleSwitcherToggle.addEventListener('click', event => {
+  event.stopPropagation();
+  toggleStyleSwitcher();
+});
+styleSwitcherToggle.addEventListener('mousedown', event => event.stopPropagation());
+styleSwitcherMenu.addEventListener('mousedown', event => event.stopPropagation());
+styleSwitcherMenu.addEventListener('click', event => {
+  event.stopPropagation();
+  const button = event.target.closest('[data-style-id]');
+  if (!button || button.getAttribute('aria-busy') === 'true') return;
+  const styleId = button.dataset.styleId;
+  const previousStyleChoice = selectedStyleChoice;
+  updateStyleSwitcher(styleId, styleId, { pending: true });
+  closeStyleSwitcher();
+  const request = window.bridge.selectWhipStyle(styleId);
+  if (request?.catch) {
+    request.catch(() => updateStyleSwitcher(activeStyle.id, previousStyleChoice));
+  }
+});
+styleSwitcherToggle.addEventListener('keydown', event => {
+  if (event.key === 'Escape') {
+    closeStyleSwitcher();
+    event.stopPropagation();
+  }
+});
+window.addEventListener('mousedown', event => {
+  if (!styleSwitcher.contains(event.target)) closeStyleSwitcher();
+});
 
 function ensureStyleAudio(style) {
   if (AUDIO_BY_STYLE.has(style.id)) return;
@@ -118,7 +329,7 @@ function resize() {
   fillHitSurface(0, 0, W, H);
 }
 
-function setActiveStyle(styleId, styleConfig) {
+function setActiveStyle(styleId, styleConfig, selectedStyleId = styleId, { pulse = false } = {}) {
   if (styleConfig?.id === styleId) STYLE_BY_ID.set(styleId, styleConfig);
   activeStyle = STYLE_BY_ID.get(styleId) || FALLBACK_STYLE;
   ensureStyleAudio(activeStyle);
@@ -126,6 +337,7 @@ function setActiveStyle(styleId, styleConfig) {
   handleAngle = P.baseTargetAngle;
   handleAngVel = 0;
   document.body.dataset.whipStyle = activeStyle.id;
+  updateStyleSwitcher(activeStyle.id, selectedStyleId, { pulse });
 }
 
 function point(x, y) {
@@ -788,14 +1000,17 @@ window.addEventListener('resize', () => {
 });
 
 window.bridge.onSpawnWhip(payload => {
-  setActiveStyle(payload?.styleId, payload?.style);
+  setActiveStyle(payload?.styleId, payload?.style, payload?.selectedStyleId || payload?.styleId);
   resetWhipState(mouseX || W / 2, mouseY || H / 2);
 });
 
 window.bridge.onRefreshWhip(payload => {
   const nextStyleId = payload?.styleId || activeStyle.id;
   const styleChanged = nextStyleId !== activeStyle.id;
-  if (styleChanged || payload?.style) setActiveStyle(nextStyleId, payload?.style);
+  const selectedStyleId = payload?.selectedStyleId || payload?.styleId || selectedStyleChoice;
+  if (styleChanged || payload?.style || payload?.selectedStyleId) {
+    setActiveStyle(nextStyleId, payload?.style, selectedStyleId, { pulse: styleChanged });
+  }
   if (payload?.respawn || styleChanged || (!whip && !closing)) {
     resetWhipState(mouseX || W / 2, mouseY || H / 2);
     return;
@@ -806,7 +1021,7 @@ window.bridge.onRefreshWhip(payload => {
 window.bridge.onDropWhip(startDropping);
 
 resize();
-setActiveStyle('leather');
+setActiveStyle('leather', undefined, 'leather');
 
 </script>
 </body>
