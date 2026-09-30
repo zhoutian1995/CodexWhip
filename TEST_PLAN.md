@@ -48,4 +48,4 @@ Keep the four whip styles and guarded delivery behavior while restoring compatib
 | Assets and documentation | Pass | Existing four-style assets remain covered; README and test-plan references are aligned with the 1.5.5 package. |
 | Packaging | Pass | `npm run dist:mac` created the 1.5.5 arm64 DMG and ZIP; the installed app reports 1.5.5 and its helper hash matches the build. |
 | Installed application | Partial | The installed 1.5.5 overlay visibly exposes style/action controls and the always-visible send status; real binding/send was not exercised against the user's active Codex session. |
-| GitHub publication | Pending | Commit and push the 1.5.5 binding guidance and macOS phrase-editor change. |
+| GitHub publication | Pass | Commit `bae54b7` containing the 1.5.5 binding guidance, read-only probe retry, and macOS TextEdit phrase-editor change is pushed to `origin/main`. |
