@@ -21,7 +21,7 @@ CodexWhip 是一个常驻系统托盘/菜单栏的 Codex Desktop 外挂。
 | macOS Intel | 暂不支持 | 当前没有 x64 构建 |
 | Linux | 暂不支持 | 没有桌面控制器 |
 
-macOS 用户请优先阅读下方的“macOS 首次授权”。当前 `v1.5.0` Release 标记为预发布版，主要原因就是 macOS 发送链路尚未完成最终验收。
+macOS 用户请优先阅读下方的“macOS 首次授权”。当前代码版本 `v1.5.1` 仍按预发布状态维护：本版本已适配当前 ChatGPT/Codex 桌面应用的任务识别变化，但 macOS 发送链路仍需完成最终实机验收。
 
 ## 它能做什么
 
@@ -210,6 +210,7 @@ npm run dist:mac
 - 连续点击、冷却和单条待发送队列。
 - Windows guarded UI Automation 事务。
 - macOS 控制器分发、参数传输和 Swift 安全检查。
+- 当前 ChatGPT/Codex AX 树快照、活动任务标题回退和新版侧栏选择器。
 - Windows ICO、macOS ICNS、四款音效和款式注册表。
 
 ## 已知限制

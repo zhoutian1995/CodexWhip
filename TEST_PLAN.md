@@ -1,8 +1,8 @@
-# CodexWhip 1.4.3 Test Plan
+# CodexWhip 1.5.1 Test Plan
 
 ## Goal
 
-Remove the short riding crop completely while preserving the remaining four whip styles, task binding, safe Codex delivery, continuous clicking, and Windows packaging behavior.
+Keep the four whip styles and guarded delivery behavior while restoring compatibility with the current ChatGPT/Codex desktop accessibility trees on macOS and Windows. The 1.5.1 patch also updates the regression fixtures used for the migrated sidebar and composer selectors.
 
 ## Release Gates
 
@@ -11,6 +11,8 @@ Remove the short riding crop completely while preserving the remaining four whip
    - The PowerShell parser reports no errors for `scripts/codex-desktop-ui.ps1`.
    - `git diff --check` passes.
    - No `crop`, short-riding-crop, or five-style references remain.
+   - macOS AX fixture covers the current `AXWebArea` document title, `sidebar-item` row, selected-state marker, and `AXTextArea` composer.
+   - Windows UIA helper accepts selected sidebar rows exposed as Button, ListItem, TreeItem, or DataItem and rejects unrelated app-shell tabs.
 2. Unit and contract tests
    - `npm test` is fully green.
    - The public style registry contains only `leather`, `flogger`, `chain`, and `cyber`.
@@ -28,23 +30,22 @@ Remove the short riding crop completely while preserving the remaining four whip
    - README and settings documentation do not advertise `crop`.
 5. Packaging and installation
    - `npm audit --omit=dev` reports zero production vulnerabilities.
-   - `npm run dist:win` creates Setup and Portable executables for version 1.4.3.
-   - The installed application reports version 1.4.3.
+   - `npm run dist:win` creates Setup and Portable executables for version 1.5.1.
+   - The installed application reports version 1.5.1.
    - Existing binding and phrase files keep their original hashes.
    - A previous `crop` setting resolves to the leather whip.
 6. GitHub publication
    - The commit is pushed to `origin/main`.
-   - Tag `v1.4.3` points to the pushed commit.
-   - Setup and Portable assets are uploaded with matching SHA256 digests.
+   - A release tag and packaged Setup/Portable assets are created only after the platform packaging gates pass.
 
 ## Execution Record
 
 | Gate | Result | Evidence |
 | --- | --- | --- |
-| Source and configuration | Pass | JavaScript checks, PowerShell parsing, and `git diff --check` passed. Production source and packaged `app.asar` contain no crop references. |
-| Unit and contract | Pass | `npm test`: 43 tests passed, including removed-style fallback, scheduler, binding, draft protection, and guarded delivery. |
-| Overlay and performance | Pass | Four styles rendered; highest P95 render cost was 0.6ms, highest P95 frame interval was 33.5ms, and idle repaint delta was 0 frames. |
-| Assets and documentation | Pass | Four-style cover and showcase regenerated; four distinct WAV files passed validation; the crop WAV is deleted. |
-| Packaging | Pass | Production audit reported 0 vulnerabilities; npm dry-run contained 43 files; Setup and Portable 1.4.3 built successfully. |
-| Installed application | Pass | `D:\APP\CodexWhip` reports 1.4.3; binding, phrase, and settings hashes were unchanged; the legacy crop setting displayed the leather whip; right click hid the overlay. |
+| Source and configuration | Partial | JavaScript syntax checks, Swift helper compilation, and `git diff --check` pass; macOS live probe returns `READY`; Windows UIA parser and live probe remain unverified on this host. |
+| Unit and contract | Pass | `npm test`: 52 tests passed sequentially, including the current AX fixture and migrated UIA contract tests. |
+| Overlay and performance | Pending | Recheck four-style rendering, click interactions, close controls, frame cost, and idle repainting. |
+| Assets and documentation | Pending | Existing four-style assets remain covered; rerun the asset and documentation checks for the 1.5.1 package. |
+| Packaging | Pending | Run the production audit and build the 1.5.1 Setup and Portable artifacts. |
+| Installed application | Pending | Install the 1.5.1 artifact and verify binding, phrase, settings, and right-click behavior. |
 | GitHub publication | Pending | Push, tag, release, and uploaded asset digests are the final release actions. |

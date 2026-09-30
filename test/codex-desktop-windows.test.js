@@ -236,3 +236,21 @@ test('PowerShell helper verifies the exact target and proves delivery with new r
   const finalVerifyIndex = sendBlock.lastIndexOf('Get-VerifiedCodexTarget', enterIndex);
   assert.ok(finalVerifyIndex >= 0 && finalVerifyIndex < enterIndex);
 });
+
+test('PowerShell helper accepts migrated sidebar rows without trusting app tabs', () => {
+  const helper = fs.readFileSync(
+    path.join(__dirname, '..', 'scripts', 'codex-desktop-ui.ps1'),
+    'utf8'
+  );
+
+  assert.match(helper, /Get-CodexTaskCandidates/u);
+  assert.match(helper, /SelectionItemPattern/u);
+  assert.match(helper, /::ListItem/u);
+  assert.match(helper, /::TreeItem/u);
+  assert.match(helper, /app-action-sidebar-thread-selected/u);
+  assert.match(helper, /sidebar\[-_ \]\?\(thread\|item\)/u);
+  assert.match(helper, /Equal-score duplicates are treated as ambiguous/u);
+  assert.match(helper, /::RadioButton/u);
+  assert.match(helper, /Get-CodexActiveTaskTitles/u);
+  assert.match(helper, /large, non-sidebar UIA/u);
+});

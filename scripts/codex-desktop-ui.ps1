@@ -681,44 +681,202 @@ namespace CodexWhip {
     )
   }
 
-  function Find-CodexTaskIdentity {
+  function Get-CodexTaskSelectionState {
+    param([System.Windows.Automation.AutomationElement]$Element)
+
+    # Chromium's UIA tree does not expose SelectionItemPattern consistently.
+    # Prefer the semantic state when it is available. Older Codex builds expose
+    # an active class instead; that fallback is evaluated by the caller.
+    $selectionPattern = $null
+    try {
+      if ($Element.TryGetCurrentPattern(
+        [System.Windows.Automation.SelectionItemPattern]::Pattern,
+        [ref]$selectionPattern
+      )) {
+        try {
+          return [bool]$selectionPattern.Current.IsSelected
+        } catch {
+          # The renderer can invalidate a pattern while switching threads.
+        }
+      }
+    } catch {
+      # A stale UIA element must not abort the whole probe.
+    }
+
+    return $false
+  }
+
+  function Get-CodexTaskCandidates {
     param([System.Windows.Automation.AutomationElement]$Root)
 
-    $buttonCondition = New-Object System.Windows.Automation.PropertyCondition(
-      [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-      [System.Windows.Automation.ControlType]::Button
-    )
-    $buttons = $Root.FindAll(
+    # Search the raw UIA tree instead of only Buttons. The new ChatGPT shell
+    # has exposed the same sidebar row as a ListItem/TreeItem in some builds,
+    # while older Codex builds expose it as a Button.
+    $elements = $Root.FindAll(
       [System.Windows.Automation.TreeScope]::Descendants,
-      $buttonCondition
+      [System.Windows.Automation.Condition]::TrueCondition
     )
+    $candidates = @()
 
-    for ($index = 0; $index -lt $buttons.Count; $index++) {
-      $button = $buttons.Item($index)
-      $className = $button.Current.ClassName
-      $classTokens = @($className -split '\s+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-      $name = $button.Current.Name.Trim()
-      $bounds = $button.Current.BoundingRectangle
+    for ($index = 0; $index -lt $elements.Count; $index++) {
+      $element = $elements.Item($index)
+      $controlType = $element.Current.ControlType
+      $isTaskRole = (
+        $controlType -eq [System.Windows.Automation.ControlType]::Button -or
+        $controlType -eq [System.Windows.Automation.ControlType]::ListItem -or
+        $controlType -eq [System.Windows.Automation.ControlType]::TreeItem -or
+        $controlType -eq [System.Windows.Automation.ControlType]::DataItem -or
+        $controlType -eq [System.Windows.Automation.ControlType]::RadioButton
+      )
+      if (-not $isTaskRole) { continue }
 
-      if (
-        [string]::IsNullOrWhiteSpace($name) -or
-        $className -notlike '*sidebar-item*' -or
-        $classTokens -notcontains 'bg-token-list-hover-background' -or
-        $className -like '*folder-row*' -or
-        $bounds.Width -lt 180 -or
-        $bounds.Height -lt 20 -or
-        $bounds.Height -gt 45
-      ) {
+      $className = $element.Current.ClassName
+      $classTokens = @($className -split '\s+' | Where-Object {
+        -not [string]::IsNullOrWhiteSpace($_)
+      })
+      $name = $element.Current.Name.Trim()
+      $bounds = $element.Current.BoundingRectangle
+      if ([string]::IsNullOrWhiteSpace($name)) { continue }
+      if ($className -match '(?i)folder[-_]row') { continue }
+      if ($bounds.Width -lt 180 -or $bounds.Height -lt 20 -or $bounds.Height -gt 60) {
         continue
       }
 
-      return [pscustomobject]@{
+      # Keep the old sidebar-item contract while accepting the conditional
+      # selector emitted by the new ChatGPT shell. That selector is present on
+      # every row, so it is only a task marker; it is not treated as proof that
+      # the row is selected. The semantic SelectionItemPattern (or an explicit
+      # selected class) supplies that proof below. This avoids selecting an
+      # arbitrary app-shell radio button as the Codex task.
+      $hasConditionalSelectedMarker = (
+        $className -match '(?i)app-action-sidebar-thread-selected\s*=\s*true'
+      )
+      $isSidebar = (
+        $classTokens -contains 'sidebar-item' -or
+        $className -match '(?i)sidebar[-_ ]?(thread|item)' -or
+        $hasConditionalSelectedMarker
+      )
+      if (-not $isSidebar) { continue }
+
+      $isSelected = Get-CodexTaskSelectionState -Element $element
+      $hasSelectedClass = (
+        $className -match '(?i)bg-token-list-hover-background' -or
+        $className -match '(?i)(^|\s)sidebar[-_ ]?(thread|item)[-_ ]?selected(\s|$)'
+      )
+      $score = 0
+      if ($isSelected) { $score += 100 }
+      if ($hasSelectedClass) { $score += 90 }
+      if ($classTokens -contains 'sidebar-item') { $score += 30 }
+      if ($controlType -eq [System.Windows.Automation.ControlType]::Button) {
+        $score += 10
+      }
+
+      $candidates += [pscustomobject]@{
         Title = $name
-        RuntimeId = Get-AutomationRuntimeId -Element $button
+        RuntimeId = Get-AutomationRuntimeId -Element $element
+        Element = $element
+        IsSelected = $isSelected
+        HasSelectedClass = $hasSelectedClass
+        Score = $score
       }
     }
 
-    return $null
+    return @($candidates)
+  }
+
+  function Get-CodexActiveTaskTitles {
+    param(
+      [System.Windows.Automation.AutomationElement]$Root,
+      [object[]]$Candidates
+    )
+
+    # In the migrated shell the selected sidebar row may expose neither
+    # SelectionItemPattern nor an active class. The main Codex content area
+    # still exposes the current task title, so use a large, non-sidebar UIA
+    # element as a semantic fallback. The geometry guard prevents matching a
+    # duplicate title in the left navigation or a small message bubble.
+    $candidateTitles = @{}
+    foreach ($candidate in $Candidates) {
+      if (-not [string]::IsNullOrWhiteSpace($candidate.Title)) {
+        $candidateTitles[$candidate.Title] = $true
+      }
+    }
+    if ($candidateTitles.Count -eq 0) { return @() }
+
+    $rootBounds = $Root.Current.BoundingRectangle
+    $minimumMainWidth = [Math]::Max(400, $rootBounds.Width * 0.45)
+    $minimumMainX = $rootBounds.X + $rootBounds.Width * 0.35
+    $elements = $Root.FindAll(
+      [System.Windows.Automation.TreeScope]::Descendants,
+      [System.Windows.Automation.Condition]::TrueCondition
+    )
+    $matches = @{}
+
+    for ($index = 0; $index -lt $elements.Count; $index++) {
+      $element = $elements.Item($index)
+      $name = $element.Current.Name.Trim()
+      if (-not $candidateTitles.ContainsKey($name)) { continue }
+
+      $controlType = $element.Current.ControlType
+      if (
+        $controlType -eq [System.Windows.Automation.ControlType]::Button -or
+        $controlType -eq [System.Windows.Automation.ControlType]::ListItem -or
+        $controlType -eq [System.Windows.Automation.ControlType]::TreeItem -or
+        $controlType -eq [System.Windows.Automation.ControlType]::DataItem -or
+        $controlType -eq [System.Windows.Automation.ControlType]::RadioButton
+      ) {
+        $className = $element.Current.ClassName
+        if ($className -match '(?i)sidebar[-_ ]?(thread|item)') { continue }
+      }
+
+      $bounds = $element.Current.BoundingRectangle
+      $isLargeMainArea = (
+        $bounds.Width -ge $minimumMainWidth -and
+        $bounds.Height -ge 80
+      )
+      $isMainArea = $bounds.X -ge $minimumMainX -and $bounds.Width -ge 180
+      if ($isLargeMainArea -or $isMainArea) {
+        $matches[$name] = $true
+      }
+    }
+
+    return @($matches.Keys)
+  }
+
+  function Find-CodexTaskIdentity {
+    param([System.Windows.Automation.AutomationElement]$Root)
+
+    $candidates = @(Get-CodexTaskCandidates -Root $Root)
+    $active = @($candidates | Where-Object {
+      $_.IsSelected -or $_.HasSelectedClass
+    } | Sort-Object -Property Score -Descending)
+    if ($active.Count -eq 0) {
+      $documentTitles = @(Get-CodexActiveTaskTitles -Root $Root -Candidates $candidates)
+      $documentMatches = @($candidates | Where-Object {
+        $documentTitles -contains $_.Title
+      })
+      if ($documentMatches.Count -eq 1) {
+        return [pscustomobject]@{
+          Title = $documentMatches[0].Title
+          RuntimeId = $documentMatches[0].RuntimeId
+        }
+      }
+      return $null
+    }
+
+    # Refuse to guess when two rows advertise the selected state. A stale or
+    # duplicated UIA tree should never cause a message to land in the wrong
+    # thread. Equal-score duplicates are treated as ambiguous as well.
+    $bestScore = $active[0].Score
+    $best = @($active | Where-Object { $_.Score -eq $bestScore })
+    if ($best.Count -ne 1) {
+      return $null
+    }
+
+    return [pscustomobject]@{
+      Title = $best[0].Title
+      RuntimeId = $best[0].RuntimeId
+    }
   }
 
   function Get-CodexTaskTitleMatchCount {
@@ -731,28 +889,12 @@ namespace CodexWhip {
       return 0
     }
 
-    $buttonCondition = New-Object System.Windows.Automation.PropertyCondition(
-      [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-      [System.Windows.Automation.ControlType]::Button
-    )
-    $buttons = $Root.FindAll(
-      [System.Windows.Automation.TreeScope]::Descendants,
-      $buttonCondition
-    )
     $runtimeIds = @{}
 
-    for ($index = 0; $index -lt $buttons.Count; $index++) {
-      $button = $buttons.Item($index)
-      $className = $button.Current.ClassName
-      if (
-        $className -notlike '*sidebar-item*' -or
-        $className -like '*folder-row*' -or
-        $button.Current.Name.Trim() -ne $Title
-      ) {
-        continue
+    foreach ($candidate in @(Get-CodexTaskCandidates -Root $Root)) {
+      if ($candidate.Title -eq $Title) {
+        $runtimeIds[$candidate.RuntimeId] = $true
       }
-
-      $runtimeIds[(Get-AutomationRuntimeId -Element $button)] = $true
     }
 
     return $runtimeIds.Count

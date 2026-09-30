@@ -1,6 +1,6 @@
 {
   "name": "codexwhip",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "A dark desktop whip for Codex Desktop on Windows and macOS",
   "author": "zhoutian1995",
   "license": "MIT",
@@ -36,7 +36,7 @@
     "assets:brand": "electron scripts/generate-brand-assets.js",
     "assets:sounds": "node scripts/generate-whip-sounds.js",
     "assets": "npm run assets:brand && npm run assets:sounds",
-    "test": "node --test",
+    "test": "node --test --test-concurrency=1",
     "test:visual": "electron scripts/overlay-visual-smoke.js",
     "pack": "electron-builder --dir",
     "build:mac-helper": "node scripts/build-macos-helper.js",

@@ -1,0 +1,58 @@
+{
+  "source": {
+    "app": "ChatGPT",
+    "bundleIdentifier": "com.openai.codex",
+    "version": "26.928.21956",
+    "capturedAt": "2026-09-30"
+  },
+  "window": {
+    "frame": { "x": 0, "y": 30, "width": 1920, "height": 987 }
+  },
+  "nodes": [
+    {
+      "role": "AXWebArea",
+      "name": "示例任务",
+      "classes": "",
+      "selected": false,
+      "focused": false,
+      "frame": { "x": 0, "y": 30, "width": 1920, "height": 987 }
+    },
+    {
+      "role": "AXButton",
+      "name": "示例任务",
+      "classes": "group relative cursor-interaction sidebar-item data-[app-action-sidebar-thread-selected=true]:bg-primary-ghost-hover",
+      "selected": false,
+      "focused": false,
+      "frame": { "x": 60, "y": 321, "width": 297, "height": 30 },
+      "runtimeId": "ax:hash:task-current"
+    },
+    {
+      "role": "AXButton",
+      "name": "另一个任务",
+      "classes": "group relative cursor-interaction sidebar-item data-[app-action-sidebar-thread-selected=true]:bg-primary-ghost-hover",
+      "selected": false,
+      "focused": false,
+      "frame": { "x": 60, "y": 290, "width": 297, "height": 30 },
+      "runtimeId": "ax:hash:task-other"
+    },
+    {
+      "role": "AXRadioButton",
+      "name": "应用标签页",
+      "classes": "no-drag app-shell-tab",
+      "selected": true,
+      "focused": false,
+      "frame": { "x": 1590, "y": 36, "width": 211, "height": 32 },
+      "runtimeId": "ax:dom:app-shell-tab:24"
+    },
+    {
+      "role": "AXTextArea",
+      "name": "随心输入",
+      "classes": "prosemirror",
+      "selected": false,
+      "focused": true,
+      "value": "",
+      "frame": { "x": 517, "y": 913, "width": 712, "height": 44 },
+      "runtimeId": "ax:hash:composer-current"
+    }
+  ]
+}

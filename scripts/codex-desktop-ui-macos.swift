@@ -233,7 +233,50 @@ func findComposer(in nodes: [AXUIElement], windowFrame: FrameInfo?) -> AXUIEleme
     return scored.sorted { $0.0 > $1.0 }.first?.1
 }
 
+func isGenericDocumentTitle(_ title: String) -> Bool {
+    let value = normalized(title).lowercased()
+    if value.isEmpty { return true }
+    return ["codex", "chatgpt", "new tab", "新标签页", "主页", "home"].contains(value)
+}
+
+/// Returns titles exposed by the active document area rather than by hidden
+/// sidebar rows or browser tabs. The current desktop app exposes the active
+/// conversation/project as a focused AXWebArea (with a large fallback area
+/// when focus is in the composer). Keeping this separate from findTask makes
+/// the title match an explicit, reviewable signal instead of guessing from a
+/// CSS class that is present on every sidebar row.
+func activeDocumentTitles(in nodes: [AXUIElement], windowFrame: FrameInfo?) -> Set<String> {
+    var areas: [(String, AXUIElement, CGFloat)] = []
+    for element in nodes where stringAttribute(element, kAXRoleAttribute) == "AXWebArea" {
+        let title = normalized(elementName(element))
+        guard !isGenericDocumentTitle(title) else { continue }
+        let area: CGFloat
+        if let frame = frameOf(element) {
+            area = max(0, frame.width) * max(0, frame.height)
+            if let windowFrame,
+               (frame.width < max(180, windowFrame.width * 0.20) ||
+                frame.height < max(120, windowFrame.height * 0.20)) {
+                continue
+            }
+        } else {
+            area = 0
+        }
+        areas.append((title, element, area))
+    }
+    guard !areas.isEmpty else { return [] }
+
+    // Focus is the strongest signal. A composer can take focus, so retain the
+    // largest visible area as a fallback when no AXWebArea is focused.
+    let focused = areas.filter { boolAttribute($0.1, kAXFocusedAttribute) }
+    if !focused.isEmpty { return Set(focused.map { $0.0 }) }
+
+    let largestArea = areas.map { $0.2 }.max() ?? 0
+    guard largestArea > 0 else { return Set(areas.map { $0.0 }) }
+    return Set(areas.filter { $0.2 >= largestArea * 0.60 }.map { $0.0 })
+}
+
 func findTask(in nodes: [AXUIElement], windowFrame: FrameInfo?) -> TaskIdentity? {
+    let documentTitles = activeDocumentTitles(in: nodes, windowFrame: windowFrame)
     var matches: [(Int, TaskIdentity)] = []
     for element in nodes {
         let role = stringAttribute(element, kAXRoleAttribute)
@@ -243,9 +286,21 @@ func findTask(in nodes: [AXUIElement], windowFrame: FrameInfo?) -> TaskIdentity?
         let classes = classText(element)
         if classes.contains("folder-row") { continue }
         let selected = boolAttribute(element, kAXSelectedAttribute)
-        let activeClass = classes.contains("bg-token-list-hover-background")
+        // The `data-[app-action-sidebar-thread-selected=true]` Tailwind
+        // variant is currently included in every sidebar row's class list;
+        // it becomes a reliable signal only when AX also reports selected.
+        let selectedMarker = classes.contains("data-[app-action-sidebar-thread-selected=true]")
+        let activeClass = classes.contains("bg-token-list-hover-background") ||
+            (selectedMarker && selected)
         let sidebarClass = classes.contains("sidebar-item")
+        let documentTitleMatch = documentTitles.contains(title)
         let frame = frameOf(element)
+        let visibleSidebarRow: Bool
+        if let frame {
+            visibleSidebarRow = frame.width >= 120 && frame.height >= 18 && frame.height <= 60
+        } else {
+            visibleSidebarRow = false
+        }
         let leftSidebarGeometry: Bool
         if let frame, let windowFrame {
             leftSidebarGeometry = frame.x < windowFrame.x + windowFrame.width * 0.45 &&
@@ -253,18 +308,25 @@ func findTask(in nodes: [AXUIElement], windowFrame: FrameInfo?) -> TaskIdentity?
         } else {
             leftSidebarGeometry = false
         }
-        guard activeClass || (selected && (sidebarClass || leftSidebarGeometry)) else { continue }
+        guard activeClass || (documentTitleMatch && visibleSidebarRow) ||
+            (selected && (sidebarClass || leftSidebarGeometry)) else { continue }
         var score = activeClass ? 100 : 0
         if sidebarClass { score += 50 }
         if selected { score += 30 }
         if leftSidebarGeometry { score += 10 }
+        if documentTitleMatch { score += 240 }
         matches.append((score, TaskIdentity(
             title: title,
             runtimeId: runtimeId(element, prefix: "task"),
             element: element
         )))
     }
-    return matches.sorted { $0.0 > $1.0 }.first?.1
+    guard let bestScore = matches.map({ $0.0 }).max() else { return nil }
+    let bestMatches = matches.filter { $0.0 == bestScore }
+    // Do not guess if two nodes claim to be the active task. This protects
+    // delivery when a new UI exposes duplicate accessibility representations.
+    guard bestMatches.count == 1 else { return nil }
+    return bestMatches[0].1
 }
 
 func taskTitleMatchCount(in nodes: [AXUIElement], title: String) -> Int {
