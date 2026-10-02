@@ -78,6 +78,10 @@ test('macOS permission failures remain actionable and never look sent', () => {
     messageForResult({ ok: false, code: 'ACCESSIBILITY_PERMISSION_REQUIRED' }),
     /Accessibility/u
   );
+  assert.match(
+    messageForResult({ ok: false, code: 'SESSION_NOT_STABLE' }),
+    /session/iu
+  );
   assert.equal(messageForResult({ ok: true, code: 'READY' }), null);
 });
 
@@ -87,6 +91,10 @@ test('Swift helper performs final identity, focus, draft and delivery checks', (
     'utf8'
   );
   assert.match(helper, /guard AXIsProcessTrusted\(\)/u);
+  assert.match(helper, /func stableCandidate\(/u);
+  assert.match(helper, /stableSamples >= 3/u);
+  assert.match(helper, /SESSION_NOT_STABLE/u);
+  assert.match(helper, /var score = activeClass \? 320 : 0/u);
   assert.match(helper, /verifyIdentity\(selected, arguments: arguments\)/u);
   assert.match(helper, /selected\.composerRuntimeId == initialComposerRuntimeId/u);
   assert.match(helper, /guard selected\.draftText\.isEmpty/u);

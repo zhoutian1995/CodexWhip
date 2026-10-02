@@ -380,11 +380,15 @@ func findTask(in nodes: [AXUIElement], windowFrame: FrameInfo?, windowTitle: Str
         guard activeClass || (documentTitleMatch && visibleSidebarRow) ||
             (windowTitleMatch && visibleSidebarRow) ||
             (selected && (sidebarClass || leftSidebarGeometry)) else { continue }
-        var score = activeClass ? 100 : 0
+        // The concrete highlighted sidebar row is a stronger signal than a
+        // document title: newer Codex builds can leave AXWebArea nodes from
+        // background tabs in the same tree. Those stale areas must not beat
+        // the row the user can currently see selected.
+        var score = activeClass ? 320 : 0
         if sidebarClass { score += 50 }
         if selected { score += 30 }
         if leftSidebarGeometry { score += 10 }
-        if documentTitleMatch { score += 240 }
+        if documentTitleMatch { score += activeClass ? 30 : 240 }
         if windowTitleMatch { score += 220 }
         matches.append((score, TaskIdentity(
             title: title,
@@ -473,6 +477,37 @@ func selectCandidate(_ candidates: [CodexCandidate], arguments: Arguments) -> Co
         return preferred
     }
     return candidates.count == 1 ? candidates[0] : nil
+}
+
+func stableCandidate(
+    app: NSRunningApplication,
+    targetTitle: String,
+    arguments: Arguments,
+    attempts: Int = 5,
+    interval: useconds_t = 160_000
+) -> CodexCandidate? {
+    var previousSignature = ""
+    var stableSamples = 0
+    for _ in 0..<attempts {
+        let candidates = allCandidates(app: app, targetTitle: targetTitle)
+        guard let candidate = selectCandidate(candidates, arguments: arguments),
+              let task = candidate.task else {
+            previousSignature = ""
+            stableSamples = 0
+            usleep(interval)
+            continue
+        }
+        let signature = "\(candidate.windowId)|\(task.title)"
+        if signature == previousSignature {
+            stableSamples += 1
+        } else {
+            previousSignature = signature
+            stableSamples = 1
+        }
+        if stableSamples >= 3 { return candidate }
+        usleep(interval)
+    }
+    return nil
 }
 
 func sameTask(_ candidate: CodexCandidate, as task: TaskIdentity?) -> Bool {
@@ -651,6 +686,17 @@ if candidates.isEmpty && arguments.mode == "probe" {
     candidates = allCandidates(app: codexApp, targetTitle: arguments.targetTaskTitle)
 }
 guard !candidates.isEmpty else { emit(false, "CODEX_MODE_NOT_FOUND") }
+if arguments.mode == "probe" {
+    if let stable = stableCandidate(
+        app: codexApp,
+        targetTitle: arguments.targetTaskTitle,
+        arguments: arguments
+    ) {
+        candidates = [stable]
+    } else {
+        emit(false, "SESSION_NOT_STABLE")
+    }
+}
 guard var selected = selectCandidate(candidates, arguments: arguments) else {
     emit(false, "AMBIGUOUS_WINDOWS", ["candidateCount": candidates.count])
 }

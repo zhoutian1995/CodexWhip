@@ -66,6 +66,7 @@ const STATUS_MESSAGES = Object.freeze({
   APP_NOT_RUNNING: 'Codex Desktop 未启动',
   ACCESSIBILITY_PERMISSION_REQUIRED: '请在 macOS 设置中允许 CodexWhip 使用辅助功能',
   CODEX_MODE_NOT_FOUND: '当前窗口没有 Codex 输入框，请先打开一个 Codex 任务，不要停留在新标签页或浏览器页面',
+  SESSION_NOT_STABLE: 'Codex 会话正在切换，请停留在目标任务后再绑定',
   COMPOSER_NOT_FOUND: '没有找到 Codex 输入框，请先点开一个 Codex 任务',
   AMBIGUOUS_WINDOWS: '存在多个 Codex 窗口，无法确定目标',
   TARGET_SESSION_REQUIRED: '请先绑定 Codex 任务',
