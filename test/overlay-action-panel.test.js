@@ -26,12 +26,14 @@ test('preload and main wire the visible action panel to existing desktop actions
   assert.match(preload, /testCodexConnection:\s*\(\)\s*=>\s*ipcRenderer\.invoke\('test-codex-connection'\)/u);
   assert.match(preload, /openPhraseLibrary:\s*\(\)\s*=>\s*ipcRenderer\.invoke\('open-phrase-library'\)/u);
   assert.match(preload, /collapseOverlayToControls:\s*\(\)\s*=>\s*ipcRenderer\.send\('collapse-overlay-controls'\)/u);
+  assert.match(preload, /setControlMenusExpanded:/u);
   assert.match(preload, /onOverlayStatus:/u);
   assert.match(main, /ipcMain\.handle\('bind-current-session'/u);
   assert.match(main, /ipcMain\.handle\('summon-whip'/u);
   assert.match(main, /ipcMain\.handle\('test-codex-connection'/u);
   assert.match(main, /ipcMain\.handle\('open-phrase-library'/u);
   assert.match(main, /ipcMain\.on\('collapse-overlay-controls'/u);
+  assert.match(main, /ipcMain\.on\('control-menus-expanded'/u);
   assert.match(main, /overlay\.webContents\.send\('overlay-status'/u);
   assert.match(main, /code:\s*saved\.ok\s*\?\s*'SESSION_BOUND'/u);
   assert.match(main, /probeCodexForAction\(options = \{\}\)/u);

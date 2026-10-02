@@ -86,10 +86,11 @@
 
   #styleSwitcherMenu {
     display: none;
-    position: absolute;
-    top: calc(100% + 7px);
-    right: 0;
-    width: 206px;
+    position: relative;
+    top: auto;
+    right: auto;
+    width: 100%;
+    margin-top: 7px;
     padding: 6px;
     border: 1px solid rgba(255, 92, 111, 0.34);
     border-radius: 12px;
@@ -358,12 +359,20 @@ function setActionPanelStatus(payload, tone = '') {
 function closeActionPanel() {
   actionPanel.classList.remove('isOpen');
   actionPanelToggle.setAttribute('aria-expanded', 'false');
+  syncControlMenuState();
+}
+
+function syncControlMenuState() {
+  window.bridge.setControlMenusExpanded(
+    styleSwitcher.classList.contains('isOpen') || actionPanel.classList.contains('isOpen')
+  );
 }
 
 function toggleActionPanel() {
   const open = !actionPanel.classList.contains('isOpen');
   actionPanel.classList.toggle('isOpen', open);
   actionPanelToggle.setAttribute('aria-expanded', String(open));
+  syncControlMenuState();
 }
 
 function runAction(actionButton) {
@@ -446,12 +455,14 @@ function updateStyleSwitcher(styleId, selectedStyleId = styleId, { pending = fal
 function closeStyleSwitcher() {
   styleSwitcher.classList.remove('isOpen');
   styleSwitcherToggle.setAttribute('aria-expanded', 'false');
+  syncControlMenuState();
 }
 
 function toggleStyleSwitcher() {
   const open = !styleSwitcher.classList.contains('isOpen');
   styleSwitcher.classList.toggle('isOpen', open);
   styleSwitcherToggle.setAttribute('aria-expanded', String(open));
+  syncControlMenuState();
 }
 
 styleSwitcherToggle.addEventListener('click', event => {

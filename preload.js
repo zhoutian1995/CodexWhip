@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('bridge', {
   openPhraseLibrary: () => ipcRenderer.invoke('open-phrase-library'),
   hideOverlay: () => ipcRenderer.send('hide-overlay'),
   collapseOverlayToControls: () => ipcRenderer.send('collapse-overlay-controls'),
+  setControlMenusExpanded: (expanded) => ipcRenderer.send('control-menus-expanded', Boolean(expanded)),
   onSpawnWhip: (fn) => ipcRenderer.on('spawn-whip', (_event, payload) => fn(payload)),
   onRefreshWhip: (fn) => ipcRenderer.on('refresh-whip', (_event, payload) => fn(payload)),
   onDropWhip: (fn) => ipcRenderer.on('drop-whip', () => fn()),

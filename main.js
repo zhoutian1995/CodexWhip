@@ -60,10 +60,12 @@ let activeWhipStyle = DEFAULT_STYLE_ID;
 let overlayHiddenForDesktopSend = false;
 let restoreRetryTimer = null;
 let overlayMode = 'stage';
+let controlMenusExpanded = false;
 
 const SEND_COOLDOWN_MS = 1500;
 const CONTROL_WINDOW_WIDTH = 310;
 const CONTROL_WINDOW_HEIGHT = 400;
+const CONTROL_WINDOW_EXPANDED_HEIGHT = 640;
 const RETRYABLE_PROBE_CODES = new Set([
   'HELPER_TIMEOUT',
   'CODEX_MODE_NOT_FOUND',
@@ -607,7 +609,7 @@ function setOverlayMode(mode) {
       x: displayBounds.x + displayBounds.width - CONTROL_WINDOW_WIDTH - 18,
       y: displayBounds.y + Math.round((displayBounds.height - CONTROL_WINDOW_HEIGHT) / 2),
       width: CONTROL_WINDOW_WIDTH,
-      height: CONTROL_WINDOW_HEIGHT,
+      height: controlMenusExpanded ? CONTROL_WINDOW_EXPANDED_HEIGHT : CONTROL_WINDOW_HEIGHT,
     }
     : displayBounds;
   overlay.setBounds(bounds);
@@ -617,6 +619,11 @@ function setOverlayMode(mode) {
 
 function collapseOverlayToControls() {
   setOverlayMode('controls');
+}
+
+function setControlMenusExpanded(expanded) {
+  controlMenusExpanded = Boolean(expanded);
+  if (overlayMode === 'controls') setOverlayMode('controls');
 }
 
 function requestOverlayDrop() {
@@ -734,6 +741,7 @@ ipcMain.handle('summon-whip', () => {
 });
 ipcMain.handle('select-whip-style', (_event, styleId) => selectWhipStyle(styleId));
 ipcMain.on('collapse-overlay-controls', collapseOverlayToControls);
+ipcMain.on('control-menus-expanded', (_event, expanded) => setControlMenusExpanded(expanded));
 ipcMain.handle('bind-current-session', () => bindCurrentSession());
 ipcMain.handle('test-codex-connection', () => testCodexConnection());
 ipcMain.handle('open-phrase-library', () => openPhraseLibrary());

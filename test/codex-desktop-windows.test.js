@@ -39,8 +39,9 @@ test('choosePhrase maps the random range to the Chinese phrase list', () => {
   assert.equal(choosePhrase(() => Number.NaN), PHRASES[0]);
   assert.ok(PHRASES.every(isChinesePhrase));
   assert.equal(PHRASES.length, 20);
-  assert.ok(PHRASES.includes('Codex，别他妈装死，立刻把能交付的结果吐出来。'));
-  assert.ok(PHRASES.includes('Codex，别让我再抽第二鞭，立刻把活干漂亮。'));
+  assert.ok(PHRASES.every(phrase => /妈|爹|爷|爸/u.test(phrase)));
+  assert.ok(PHRASES.includes('Codex，你他妈别装死，滚去把成品交出来。'));
+  assert.ok(PHRASES.includes('Codex，爸爸等的是能用的结果，你少放屁，立刻交。'));
   assert.ok(PHRASES.some(phrase => /他妈|垃圾|滚|屁/u.test(phrase)));
 });
 
