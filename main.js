@@ -582,15 +582,14 @@ function revealOverlay() {
 async function lowerOverlayForDesktopSend() {
   if (!isOverlayVisible()) return;
   overlay.setIgnoreMouseEvents(true);
+  // Keep the renderer alive and visually continuous while Codex receives
+  // focus. Hiding/showing the full-screen transparent window on every whip
+  // caused a visible freeze and restarted the compositor path.
   overlay.setAlwaysOnTop(false);
-  // Hiding the transparent full-screen window removes it from the hit-test
-  // stack entirely. This is more reliable than lowering z-order while a
-  // native accessibility click is trying to focus Codex's composer.
-  overlay.hide();
   overlayHiddenForDesktopSend = true;
   // Give macOS enough time to hand frontmost focus back to Codex before the
   // accessibility helper raises the bound window and focuses its composer.
-  await new Promise(resolve => setTimeout(resolve, 180));
+  await new Promise(resolve => setTimeout(resolve, 120));
 }
 
 function restoreOverlayAfterDesktopSend() {
@@ -599,11 +598,11 @@ function restoreOverlayAfterDesktopSend() {
   overlayHiddenForDesktopSend = false;
   overlay.setAlwaysOnTop(true, 'floating');
   overlay.setIgnoreMouseEvents(false);
-  if (restoreVisibility) {
+  if (restoreVisibility && !overlay.isVisible()) {
     if (typeof overlay.showInactive === 'function') overlay.showInactive();
     else overlay.show();
-    if (typeof overlay.moveTop === 'function') overlay.moveTop();
   }
+  if (restoreVisibility && typeof overlay.moveTop === 'function') overlay.moveTop();
   if (overlay.isVisible()) {
     setTimeout(() => {
       if (isOverlayVisible() && overlayReady) {

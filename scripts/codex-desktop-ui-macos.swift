@@ -569,6 +569,13 @@ func raiseWindow(_ window: AXUIElement) {
     _ = AXUIElementSetAttributeValue(window, kAXFocusedAttribute as CFString, kCFBooleanTrue)
 }
 
+func raiseMainWindow(_ app: NSRunningApplication) {
+    let appElement = AXUIElementCreateApplication(app.processIdentifier)
+    guard let windows = copyAttribute(appElement, kAXWindowsAttribute) as? [AXUIElement] else { return }
+    let window = windows.first(where: { boolAttribute($0, kAXMainAttribute) }) ?? windows.first
+    if let window { raiseWindow(window) }
+}
+
 func clickComposer(_ composer: AXUIElement) {
     guard let frame = frameOf(composer), frame.width >= 20, frame.height >= 20 else { return }
     let point = CGPoint(x: frame.x + frame.width * 0.5, y: frame.y + frame.height * 0.5)
@@ -698,7 +705,8 @@ if candidates.isEmpty && arguments.mode == "probe" {
     // Bring Codex forward once and let its AX tree settle before refusing the
     // binding; this is read-only and never submits a prompt.
     _ = activate(codexApp)
-    usleep(240_000)
+    raiseMainWindow(codexApp)
+    usleep(420_000)
     candidates = allCandidates(app: codexApp, targetTitle: arguments.targetTaskTitle)
 }
 if arguments.mode == "probe" {
