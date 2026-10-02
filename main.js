@@ -303,11 +303,9 @@ async function probeCodexForAction(options = {}) {
     // Give macOS one permission refresh and one extra AX-tree sample before
     // reporting a permission failure that may only be stale TCC state.
     if (result.code === 'ACCESSIBILITY_PERMISSION_REQUIRED') {
-      const trusted = requestMacAccessibilityPermission(true);
-      if (trusted) {
-        await new Promise(resolve => setTimeout(resolve, 300));
-        result = await probeCodexDesktop(options);
-      }
+      requestMacAccessibilityPermission(true);
+      await new Promise(resolve => setTimeout(resolve, 300));
+      result = await probeCodexDesktop(options);
     }
     return result;
   } finally {
