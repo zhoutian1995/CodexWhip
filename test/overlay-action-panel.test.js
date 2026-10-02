@@ -31,6 +31,8 @@ test('preload and main wire the visible action panel to existing desktop actions
   assert.match(main, /probeCodexForAction\(options = \{\}\)/u);
   assert.match(main, /lowerOverlayForDesktopSend\(\)/u);
   assert.match(main, /result\.code === 'ACCESSIBILITY_PERMISSION_REQUIRED'/u);
+  assert.match(main, /Restore only the task that is actually open/u);
+  assert.match(main, /不是当前任务，请重新绑定/u);
   assert.match(main, /code:\s*error\s*\?\s*'PHRASE_LIBRARY_OPEN_FAILED'/u);
   assert.match(main, /当前窗口没有 Codex 输入框/u);
   assert.match(main, /execFile\('\/usr\/bin\/open', \['-a', 'TextEdit'/u);

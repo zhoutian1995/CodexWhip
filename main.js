@@ -78,6 +78,9 @@ const STATUS_MESSAGES = Object.freeze({
   FOCUS_FAILED: '无法确认焦点仍在绑定任务输入框，本次未发送',
   DELIVERY_AMBIGUOUS: '检测到多个新消息候选，已停止猜测',
   DELIVERY_UNCONFIRMED: '无法证明消息已进入绑定任务',
+  HELPER_TIMEOUT: 'Codex 当前任务加载较慢，探测超时，请停留在任务页面后重试',
+  HELPER_FAILURE: 'Codex 会话探测失败，请停留在任务页面后重试',
+  HELPER_OUTPUT_INVALID: 'Codex 返回了无法识别的会话信息，请重试',
   STEER_DELIVERY_UNCONFIRMED: '已触发引导，但无法确认消息完成投递',
   ACCESS_DENIED: 'CodexWhip 与 Codex 权限等级不一致',
   DUPLICATE_TASK_TITLE: '存在同名任务，无法安全恢复绑定',
@@ -353,7 +356,19 @@ async function restoreSavedSession() {
     return;
   }
 
-  const probeResult = await probeCodexDesktop({ targetTaskTitle: saved.taskTitle });
+  // Restore only the task that is actually open. Looking up a saved title in
+  // the sidebar can select a background row and make a fresh launch appear
+  // bound while the visible Codex conversation is different.
+  const probeResult = await probeCodexDesktop();
+  if (!probeResult.ok) {
+    setTrayStatus(`上次绑定未恢复：${statusForResult(probeResult)}`);
+    return;
+  }
+  if (probeResult.taskTitle !== saved.taskTitle) {
+    setTrayStatus(`上次绑定未恢复：「${shorten(saved.taskTitle, 18)}」不是当前任务，请重新绑定`);
+    return;
+  }
+
   const restored = restoreBinding(saved.taskTitle, probeResult);
   if (!restored.ok) {
     setTrayStatus(`记忆绑定未恢复：${statusForResult(restored)}`);

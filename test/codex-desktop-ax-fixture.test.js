@@ -74,6 +74,7 @@ test('macOS helper keeps semantic fallbacks for the current AX shape', () => {
   assert.match(helper, /func hasClassToken/u);
   assert.match(helper, /hasClassToken\(classes, "bg-token-list-hover-background"\)/u);
   assert.match(helper, /hasClassToken\(classes, "bg-primary-ghost-hover"\)/u);
+  assert.match(helper, /bg-primary-ghost-hover.*documentTitleMatch/u);
   assert.match(helper, /let threadRowShape = hasClassToken\(classes, "group"\)/u);
   assert.match(helper, /windowTitleMatch/u);
   assert.match(helper, /sidebar-item/u);

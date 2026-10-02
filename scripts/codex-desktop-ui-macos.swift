@@ -357,11 +357,15 @@ func findTask(in nodes: [AXUIElement], windowFrame: FrameInfo?, windowTitle: Str
         // variant token (`data-[...]:bg-primary-ghost-hover`) that is present
         // on every row in the current ChatGPT shell.
         let threadRowShape = hasClassToken(classes, "group") || selectedMarker
+        let documentTitleMatch = documentTitles.contains(title)
+        // `bg-primary-ghost-hover` is also applied while the pointer merely
+        // hovers a row. Trust it as an active signal only when that row also
+        // matches the active document title; otherwise the hover can bind a
+        // neighboring task instead of the conversation currently open.
         let activeClass = hasClassToken(classes, "bg-token-list-hover-background") ||
-            (hasClassToken(classes, "bg-primary-ghost-hover") && threadRowShape) ||
+            (hasClassToken(classes, "bg-primary-ghost-hover") && threadRowShape && documentTitleMatch) ||
             (selectedMarker && selected)
         let sidebarClass = classes.contains("sidebar-item")
-        let documentTitleMatch = documentTitles.contains(title)
         let windowTitleMatch = !normalizedWindowTitle.isEmpty && title == normalizedWindowTitle
         let frame = frameOf(element)
         let visibleSidebarRow: Bool
@@ -536,12 +540,19 @@ func verifyIdentity(_ candidate: CodexCandidate, arguments: Arguments) {
 }
 
 func activate(_ app: NSRunningApplication) -> Bool {
-    if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == codexBundleIdentifier { return true }
-    _ = app.activate(options: [.activateIgnoringOtherApps, .activateAllWindows])
-    for _ in 0..<20 {
-        usleep(60_000)
+    for _ in 0..<4 {
         if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == codexBundleIdentifier {
             return true
+        }
+        // activateIgnoringOtherApps stopped taking effect on macOS 14. The
+        // supported activateAllWindows option still brings a running Codex
+        // process to the front after the transparent overlay is hidden.
+        _ = app.activate(options: [.activateAllWindows])
+        for _ in 0..<12 {
+            usleep(80_000)
+            if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == codexBundleIdentifier {
+                return true
+            }
         }
     }
     return false
@@ -740,7 +751,7 @@ let beforeMessageIds = matchingTextRuntimeIds(
 )
 
 guard activate(codexApp) else {
-    emit(false, "TARGET_WINDOW_NOT_ACTIVE", ["hwnd": initialWindowId])
+    emit(false, "TARGET_WINDOW_NOT_ACTIVE", ["hwnd": initialWindowId, "stage": "activate"])
 }
 raiseWindow(selected.window)
 usleep(120_000)
@@ -749,7 +760,7 @@ candidates = allCandidates(app: codexApp, targetTitle: arguments.targetTaskTitle
 guard let activated = candidates.first(where: { $0.windowId == initialWindowId }) ??
     candidates.first(where: { sameTask($0, as: selected.task) }) ??
     selectCandidate(candidates, arguments: arguments) else {
-    emit(false, "TARGET_WINDOW_NOT_ACTIVE", ["hwnd": initialWindowId])
+    emit(false, "TARGET_WINDOW_NOT_ACTIVE", ["hwnd": initialWindowId, "stage": "raise"])
 }
 selected = activated
 verifyIdentity(selected, arguments: arguments)
@@ -773,7 +784,7 @@ usleep(100_000)
 
 candidates = allCandidates(app: codexApp, targetTitle: arguments.targetTaskTitle)
 guard let beforeSubmit = candidateForTask(candidates, windowId: initialWindowId, task: selected.task) else {
-    emit(false, "TARGET_WINDOW_NOT_ACTIVE", ["hwnd": initialWindowId])
+    emit(false, "TARGET_WINDOW_NOT_ACTIVE", ["hwnd": initialWindowId, "stage": "composer-recheck"])
 }
 verifyIdentity(beforeSubmit, arguments: arguments)
 guard beforeSubmit.composerRuntimeId == initialComposerRuntimeId else {
