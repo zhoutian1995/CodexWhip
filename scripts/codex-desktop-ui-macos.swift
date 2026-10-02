@@ -528,8 +528,13 @@ func verifyIdentity(_ candidate: CodexCandidate, arguments: Arguments) {
     guard let task = candidate.task else {
         emit(false, "TASK_ID_NOT_FOUND", ["hwnd": candidate.windowId, "processId": candidate.app.processIdentifier])
     }
-    if (!arguments.targetTaskTitle.isEmpty && task.title != arguments.targetTaskTitle) ||
-       (!arguments.targetTaskRuntimeId.isEmpty && task.runtimeId != arguments.targetTaskRuntimeId) {
+    let titleMismatch = !arguments.targetTaskTitle.isEmpty && task.title != arguments.targetTaskTitle
+    let runtimeMismatch = !arguments.targetTaskRuntimeId.isEmpty && task.runtimeId != arguments.targetTaskRuntimeId
+    // AX hash IDs can change when Codex rebuilds the sidebar/composer. A
+    // unique title is a safe fallback for the same window; duplicate titles
+    // still require the runtime identity and are refused below.
+    let uniqueTitleFallback = runtimeMismatch && !titleMismatch && candidate.taskTitleMatchCount == 1
+    if titleMismatch || (runtimeMismatch && !uniqueTitleFallback) {
         emit(false, "TARGET_SESSION_MISMATCH", [
             "hwnd": candidate.windowId,
             "processId": candidate.app.processIdentifier,
