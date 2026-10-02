@@ -260,11 +260,13 @@ async function main() {
   if (interactions.singleRequestCount !== 1) failures.push('single click IPC count');
   if (interactions.rapidRequestCount !== 3) failures.push('rapid click IPC count');
   if (interactions.closePreservedRequestCount !== 1) failures.push('close preserves queued click');
-  if (interactions.hideRequestCount < 1) failures.push('right click hides overlay');
+  if (interactions.hideRequestCount !== 0) failures.push('right click closes the whole overlay');
   if (idleStop.additionalFrames > 2) failures.push('idle frame stop');
   if (results.some(result => result.activeStyle !== result.styleId)) failures.push('style activation');
   if (results.some(result => result.p95RenderCostMs > 33)) failures.push('render cost');
-  if (results.some(result => result.p95FrameIntervalMs > 34 || result.frames < 20)) {
+  // A 30 FPS target is 33.33ms; allow one scheduler millisecond for the
+  // Electron/macOS compositor while still catching real frame stalls.
+  if (results.some(result => result.p95FrameIntervalMs > 35 || result.frames < 20)) {
     failures.push('frame cadence');
   }
   if (viewportResults.some(result => result.highContrastSamples < 20)) failures.push('viewport rendering');

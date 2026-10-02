@@ -10,7 +10,9 @@ const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
 
 test('overlay exposes visible session and phrase actions', () => {
   assert.match(overlay, /id="actionPanel"/u);
+  assert.match(overlay, /id="controlDock"/u);
   assert.match(overlay, /data-action="bind"/u);
+  assert.match(overlay, /data-action="summon"/u);
   assert.match(overlay, /data-action="test"/u);
   assert.match(overlay, /data-action="phrases"/u);
   assert.match(overlay, /ACTION_BRIDGE_METHODS/u);
@@ -20,12 +22,16 @@ test('overlay exposes visible session and phrase actions', () => {
 
 test('preload and main wire the visible action panel to existing desktop actions', () => {
   assert.match(preload, /bindCurrentSession:\s*\(\)\s*=>\s*ipcRenderer\.invoke\('bind-current-session'\)/u);
+  assert.match(preload, /summonWhip:\s*\(\)\s*=>\s*ipcRenderer\.invoke\('summon-whip'\)/u);
   assert.match(preload, /testCodexConnection:\s*\(\)\s*=>\s*ipcRenderer\.invoke\('test-codex-connection'\)/u);
   assert.match(preload, /openPhraseLibrary:\s*\(\)\s*=>\s*ipcRenderer\.invoke\('open-phrase-library'\)/u);
+  assert.match(preload, /collapseOverlayToControls:\s*\(\)\s*=>\s*ipcRenderer\.send\('collapse-overlay-controls'\)/u);
   assert.match(preload, /onOverlayStatus:/u);
   assert.match(main, /ipcMain\.handle\('bind-current-session'/u);
+  assert.match(main, /ipcMain\.handle\('summon-whip'/u);
   assert.match(main, /ipcMain\.handle\('test-codex-connection'/u);
   assert.match(main, /ipcMain\.handle\('open-phrase-library'/u);
+  assert.match(main, /ipcMain\.on\('collapse-overlay-controls'/u);
   assert.match(main, /overlay\.webContents\.send\('overlay-status'/u);
   assert.match(main, /code:\s*saved\.ok\s*\?\s*'SESSION_BOUND'/u);
   assert.match(main, /probeCodexForAction\(options = \{\}\)/u);

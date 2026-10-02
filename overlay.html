@@ -11,15 +11,24 @@
   /* The overlay is intentionally click-through everywhere except this small
      control. It keeps style switching discoverable without competing with
      the whip animation. */
-  #styleSwitcher {
+  #controlDock {
     position: fixed;
     z-index: 10;
     top: 50%;
     right: 18px;
     transform: translateY(-50%);
+    width: 260px;
+    pointer-events: auto;
+  }
+
+  #styleSwitcher {
+    position: relative;
+    top: auto;
+    right: auto;
+    transform: none;
+    width: 100%;
     color: rgba(255, 244, 246, 0.94);
     font: 13px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    pointer-events: auto;
     cursor: default;
     user-select: none;
   }
@@ -36,7 +45,8 @@
 
   #styleSwitcherToggle {
     min-height: 34px;
-    max-width: 240px;
+    max-width: none;
+    width: 100%;
     padding: 7px 12px;
     display: inline-flex;
     align-items: center;
@@ -120,11 +130,11 @@
   }
 
   #actionPanel {
-    position: fixed;
-    z-index: 10;
-    top: calc(50% + 30px);
-    right: 18px;
-    width: 230px;
+    position: relative;
+    top: auto;
+    right: auto;
+    width: 100%;
+    margin-top: 8px;
     color: rgba(255, 244, 246, 0.94);
     font: 13px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     pointer-events: auto;
@@ -144,7 +154,9 @@
   #actionPanelToggle {
     min-height: 31px;
     padding: 6px 11px;
-    float: right;
+    float: none;
+    width: 100%;
+    text-align: left;
     transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
   }
 
@@ -199,6 +211,7 @@
 </style>
 </head>
 <body>
+<div id="controlDock" aria-label="鞭子控制台">
 <div id="styleSwitcher" aria-label="鞭子款式切换">
   <button id="styleSwitcherToggle" type="button" aria-expanded="false" aria-controls="styleSwitcherMenu">
     <span class="styleSwitcherIcon" aria-hidden="true">⚡</span>
@@ -218,11 +231,13 @@
   <button id="actionPanelToggle" type="button" aria-expanded="false" aria-controls="actionPanelMenu">🎬 操作台</button>
   <div id="actionPanelStatus" role="status" aria-live="polite">状态：未绑定任务</div>
   <div id="actionPanelMenu">
-    <div class="actionPanelHint">这里可以直接检查 Codex 绑定和词库</div>
+    <div class="actionPanelHint">鞭子和控制台在同一层，右键收鞭后仍可继续操作</div>
+    <button type="button" data-action="summon" aria-busy="false">⚡ 召唤鞭子</button>
     <button type="button" data-action="bind" aria-busy="false">🔗 绑定当前会话</button>
     <button type="button" data-action="test" aria-busy="false">🧪 测试当前绑定</button>
     <button type="button" data-action="phrases" aria-busy="false">📖 打开中文词库</button>
   </div>
+</div>
 </div>
 <canvas id="c"></canvas>
 <script>
@@ -322,6 +337,7 @@ const actionPanelMenu = document.getElementById('actionPanelMenu');
 const actionPanelStatus = document.getElementById('actionPanelStatus');
 const actionButtons = [...actionPanelMenu.querySelectorAll('[data-action]')];
 const ACTION_BRIDGE_METHODS = Object.freeze({
+  summon: 'summonWhip',
   bind: 'bindCurrentSession',
   test: 'testCodexConnection',
   phrases: 'openPhraseLibrary',
@@ -673,8 +689,8 @@ function startDropping() {
     return;
   }
   if (!whip) {
-    closing = true;
-    window.bridge.hideOverlay();
+    closing = false;
+    refreshWhipSurface();
   }
 }
 
@@ -857,7 +873,9 @@ function update() {
   if (dropping && allPoints().every(current => current.y > H + 80)) {
     whip = null;
     dropping = false;
-    window.bridge.hideOverlay();
+    closing = false;
+    refreshWhipSurface();
+    window.bridge.collapseOverlayToControls();
   }
   prevMouseX = mouseX;
   prevMouseY = mouseY;
@@ -1135,12 +1153,10 @@ function loop(timestamp) {
 document.addEventListener('mousemove', event => {
   mouseX = event.clientX;
   mouseY = event.clientY;
-  if (!whip && !dropping && !closing) resetWhipState(mouseX, mouseY);
   scheduleFrame();
 }, { passive: true });
 
 document.addEventListener('mousedown', event => {
-  if (!whip && !dropping && !closing) resetWhipState(event.clientX, event.clientY);
   if (!whip || dropping || closing) return;
   if (event.button === 2) {
     startDropping();

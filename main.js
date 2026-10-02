@@ -58,9 +58,18 @@ let steerModeReady = false;
 let selectedWhipStyle = DEFAULT_STYLE_ID;
 let activeWhipStyle = DEFAULT_STYLE_ID;
 let overlayHiddenForDesktopSend = false;
+let restoreRetryTimer = null;
+let overlayMode = 'stage';
 
 const SEND_COOLDOWN_MS = 1500;
-const DROP_HIDE_TIMEOUT_MS = 1800;
+const CONTROL_WINDOW_WIDTH = 310;
+const CONTROL_WINDOW_HEIGHT = 400;
+const RETRYABLE_PROBE_CODES = new Set([
+  'HELPER_TIMEOUT',
+  'CODEX_MODE_NOT_FOUND',
+  'COMPOSER_NOT_FOUND',
+  'SESSION_NOT_STABLE',
+]);
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 const STATUS_MESSAGES = Object.freeze({
   APP_NOT_RUNNING: 'Codex Desktop 未启动',
@@ -212,7 +221,7 @@ function refreshTrayMenu() {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       {
-        label: isOverlayVisible() ? '收起鞭子' : '召唤鞭子',
+        label: isOverlayVisible() ? '隐藏操作台' : '召唤鞭子',
         click: toggleOverlay,
       },
       {
@@ -302,12 +311,16 @@ async function probeCodexForAction(options = {}) {
 
   try {
     let result = await probeCodexDesktop(options);
-    // The overlay can be the frontmost window while the user clicks Bind.
-    // Give macOS one permission refresh and one extra AX-tree sample before
-    // reporting a permission failure that may only be stale TCC state.
-    if (result.code === 'ACCESSIBILITY_PERMISSION_REQUIRED') {
-      requestMacAccessibilityPermission(true);
-      await new Promise(resolve => setTimeout(resolve, 300));
+    // The overlay can be frontmost while the user clicks Bind, and Codex can
+    // expose an incomplete AX tree for a few seconds while changing tasks.
+    // Retry transient probe failures before surfacing a red binding error.
+    for (let attempt = 0; attempt < 2 && !result.ok; attempt += 1) {
+      if (result.code === 'ACCESSIBILITY_PERMISSION_REQUIRED') {
+        requestMacAccessibilityPermission(true);
+      }
+      if (!RETRYABLE_PROBE_CODES.has(result.code)
+        && result.code !== 'ACCESSIBILITY_PERMISSION_REQUIRED') break;
+      await new Promise(resolve => setTimeout(resolve, 350 * (attempt + 1)));
       result = await probeCodexDesktop(options);
     }
     return result;
@@ -349,11 +362,13 @@ function clearBoundSession() {
   setTrayStatus(result.ok ? '已解除绑定' : '绑定已解除，但记忆文件删除失败');
 }
 
-async function restoreSavedSession() {
+async function restoreSavedSession({ quiet = false } = {}) {
   const saved = loadBinding(bindingFilePath);
   if (!saved.ok) {
-    setTrayStatus(saved.code === 'BINDING_NOT_FOUND' ? '未绑定任务' : '绑定记忆无效，请重新绑定');
-    return;
+    if (!quiet) {
+      setTrayStatus(saved.code === 'BINDING_NOT_FOUND' ? '未绑定任务' : '绑定记忆无效，请重新绑定');
+    }
+    return saved;
   }
 
   // Restore only the task that is actually open. Looking up a saved title in
@@ -361,22 +376,58 @@ async function restoreSavedSession() {
   // bound while the visible Codex conversation is different.
   const probeResult = await probeCodexDesktop();
   if (!probeResult.ok) {
-    setTrayStatus(`上次绑定未恢复：${statusForResult(probeResult)}`);
-    return;
+    if (!quiet) setTrayStatus(`上次绑定未恢复：${statusForResult(probeResult)}`);
+    return probeResult;
   }
   if (probeResult.taskTitle !== saved.taskTitle) {
-    setTrayStatus(`上次绑定未恢复：「${shorten(saved.taskTitle, 18)}」不是当前任务，请重新绑定`);
-    return;
+    const mismatch = {
+      ok: false,
+      code: 'TARGET_SESSION_MISMATCH',
+      savedTaskTitle: saved.taskTitle,
+      currentTaskTitle: probeResult.taskTitle,
+    };
+    if (!quiet) {
+      setTrayStatus(`上次绑定未恢复：「${shorten(saved.taskTitle, 18)}」不是当前任务，请重新绑定`);
+    }
+    return mismatch;
   }
 
   const restored = restoreBinding(saved.taskTitle, probeResult);
   if (!restored.ok) {
-    setTrayStatus(`记忆绑定未恢复：${statusForResult(restored)}`);
-    return;
+    if (!quiet) setTrayStatus(`记忆绑定未恢复：${statusForResult(restored)}`);
+    return restored;
   }
 
   boundSession = restored.binding;
   setTrayStatus(`已自动恢复：${boundSession.taskTitle}`);
+  return restored;
+}
+
+function scheduleSavedSessionRestore() {
+  clearTimeout(restoreRetryTimer);
+  restoreRetryTimer = null;
+  let attempts = 0;
+  const retry = async () => {
+    restoreRetryTimer = null;
+    if (boundSession || attempts >= 6) return;
+    attempts += 1;
+    const result = await restoreSavedSession({ quiet: true });
+    if (boundSession) return;
+    if (!result.ok && !RETRYABLE_PROBE_CODES.has(result.code)) {
+      if (result.code === 'TARGET_SESSION_MISMATCH' && result.savedTaskTitle) {
+        setTrayStatus(`当前任务「${shorten(result.currentTaskTitle, 16)}」与已保存任务「${shorten(result.savedTaskTitle, 16)}」不同，请点击绑定当前会话`);
+      } else {
+        setTrayStatus(`上次绑定未恢复：${statusForResult(result)}`);
+      }
+      return;
+    }
+    if (attempts < 6) {
+      restoreRetryTimer = setTimeout(retry, 1500);
+    } else {
+      setTrayStatus(`上次绑定未恢复：${statusForResult(result)}`);
+    }
+  };
+  restoreRetryTimer = setTimeout(retry, 800);
 }
 
 async function testCodexConnection() {
@@ -546,16 +597,38 @@ function hideOverlay() {
   refreshTrayMenu();
 }
 
+function setOverlayMode(mode) {
+  if (!isOverlayUsable()) return;
+  overlayMode = mode === 'controls' ? 'controls' : 'stage';
+  if (!screen?.getPrimaryDisplay) return;
+  const displayBounds = screen.getPrimaryDisplay().bounds;
+  const bounds = overlayMode === 'controls'
+    ? {
+      x: displayBounds.x + displayBounds.width - CONTROL_WINDOW_WIDTH - 18,
+      y: displayBounds.y + Math.round((displayBounds.height - CONTROL_WINDOW_HEIGHT) / 2),
+      width: CONTROL_WINDOW_WIDTH,
+      height: CONTROL_WINDOW_HEIGHT,
+    }
+    : displayBounds;
+  overlay.setBounds(bounds);
+  overlay.setIgnoreMouseEvents(false);
+  if (overlayReady) overlay.webContents.send('overlay-mode', overlayMode);
+}
+
+function collapseOverlayToControls() {
+  setOverlayMode('controls');
+}
+
 function requestOverlayDrop() {
   if (!isOverlayVisible()) return;
+  // Right-click收鞭 only. Keep the operation desk in this same overlay so
+  // the user can bind, test, or summon again without reopening a window.
   overlay.webContents.send('drop-whip');
-  clearTimeout(dropHideTimer);
-  dropHideTimer = setTimeout(hideOverlay, DROP_HIDE_TIMEOUT_MS);
 }
 
 function toggleOverlay() {
   if (isOverlayVisible()) {
-    requestOverlayDrop();
+    hideOverlay();
     return;
   }
   revealOverlay();
@@ -567,6 +640,7 @@ function revealOverlay() {
   if (!isOverlayUsable()) createOverlay();
   if (!isOverlayUsable()) return;
 
+  setOverlayMode('stage');
   activeWhipStyle = resolveWhipStyle(selectedWhipStyle);
   overlay.show();
   if (typeof overlay.moveTop === 'function') overlay.moveTop();
@@ -654,7 +728,12 @@ async function performWhipSend() {
 }
 
 ipcMain.handle('whip-crack', () => getWhipSendScheduler().request());
+ipcMain.handle('summon-whip', () => {
+  revealOverlay();
+  return { ok: true, code: 'WHIP_SUMMONED', message: '已召唤鞭子' };
+});
 ipcMain.handle('select-whip-style', (_event, styleId) => selectWhipStyle(styleId));
+ipcMain.on('collapse-overlay-controls', collapseOverlayToControls);
 ipcMain.handle('bind-current-session', () => bindCurrentSession());
 ipcMain.handle('test-codex-connection', () => testCodexConnection());
 ipcMain.handle('open-phrase-library', () => openPhraseLibrary());
@@ -703,9 +782,15 @@ if (!hasSingleInstanceLock) {
     refreshTrayMenu();
     tray.on('click', toggleOverlay);
 
+    const savedBinding = loadBinding(bindingFilePath);
     const accessibilityReady = requestMacAccessibilityPermission(true);
-    await restoreSavedSession();
-    if (!accessibilityReady) {
+    await restoreSavedSession({ quiet: savedBinding.ok });
+    if (!boundSession && savedBinding.ok) scheduleSavedSessionRestore();
+    // Do not overwrite a successful restore, or a more useful AX probe error,
+    // with a stale synchronous TCC result. On macOS the helper can be trusted
+    // through the app bundle while systemPreferences briefly reports false
+    // after a reinstall or a Settings toggle.
+    if (!accessibilityReady && !boundSession && !savedBinding.ok && trayStatus === '未绑定任务') {
       setTrayStatus('请先授予 macOS 辅助功能权限，再绑定 Codex 任务');
     }
     if (!steerModeResult.ok) {
@@ -728,6 +813,7 @@ if (!hasSingleInstanceLock) {
 
 app.on('will-quit', () => {
   clearTimeout(dropHideTimer);
+  clearTimeout(restoreRetryTimer);
   whipSendScheduler?.dispose();
   phraseLibrary?.close();
   globalShortcut.unregisterAll();

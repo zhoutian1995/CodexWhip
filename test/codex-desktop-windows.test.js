@@ -157,7 +157,7 @@ test('overlay stays visible after left click and supports three close controls',
   assert.match(overlay, /event\.button\s*===\s*2[\s\S]*?startDropping\(\)/u);
   assert.match(overlay, /TARGET_FRAME_INTERVAL_MS\s*=\s*1000\s*\/\s*30/u);
   assert.match(overlay, /constraintIters:\s*6/u);
-  assert.match(overlay, /resetWhipState\(event\.clientX, event\.clientY\)/u);
+  assert.match(overlay, /if \(!whip \|\| dropping \|\| closing\) return;/u);
   assert.match(overlay, /onRefreshWhip/u);
   assert.doesNotMatch(overlay, /desynchronized:\s*true/u);
   assert.match(preload, /ipcRenderer\.invoke\('whip-crack'\)/u);
