@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; media-src 'self'; img-src 'self' data:">
 <style>
+  *, *::before, *::after { box-sizing: border-box; }
   * { margin: 0; padding: 0; cursor: none; }
   html, body { overflow: hidden; background: transparent; width: 100%; height: 100%; }
   canvas { display: block; }
@@ -199,16 +200,31 @@
     font-size: 11px;
   }
   #actionPanelStatus {
-    min-height: 30px;
-    padding: 6px 8px 2px;
+    min-height: 32px;
+    margin-top: 7px;
+    padding: 7px 10px;
+    border: 1px solid rgba(255, 92, 111, 0.26);
+    border-radius: 10px;
+    background: rgba(18, 8, 12, 0.72);
     color: rgba(255, 216, 220, 0.76);
     font-size: 11px;
-    text-align: right;
+    line-height: 1.45;
+    text-align: left;
     overflow-wrap: anywhere;
   }
-  #actionPanelStatus[data-tone="success"] { color: #8ee6b1; }
-  #actionPanelStatus[data-tone="error"] { color: #ffabb4; }
-  #actionPanelStatus[data-tone="pending"] { color: #ffd27d; }
+  #actionPanelStatus[data-tone="success"] {
+    color: #8ee6b1;
+    border-color: rgba(104, 220, 153, 0.34);
+  }
+  #actionPanelStatus[data-tone="error"] {
+    color: #ffabb4;
+    border-color: rgba(255, 92, 111, 0.48);
+    background: rgba(66, 10, 20, 0.58);
+  }
+  #actionPanelStatus[data-tone="pending"] {
+    color: #ffd27d;
+    border-color: rgba(255, 210, 125, 0.34);
+  }
 </style>
 </head>
 <body>
@@ -304,7 +320,6 @@ let handleAngVel = 0;
 let crackPulse = 0;
 let lastCrackResult = { status: 'idle' };
 
-const CRACK_SEND_DELAY_MS = 220;
 const MOTION_EPSILON = 0.12;
 const MAX_IDLE_PHYSICS_FRAMES = 90;
 const SETTLE_FRAMES = 4;
@@ -348,7 +363,18 @@ function setActionPanelStatus(payload, tone = '') {
   const status = typeof payload === 'string' ? payload : payload?.status || payload?.message;
   if (!status) return;
   actionPanelStatus.textContent = `状态：${status}`;
-  actionPanelStatus.dataset.tone = tone || (payload?.ok === false ? 'error' : payload?.ok ? 'success' : '');
+  const inferredTone = payload?.ok === false
+    ? 'error'
+    : payload?.ok
+      ? 'success'
+      : /^正在|排队/u.test(status)
+        ? 'pending'
+        : /绑定失败|发送失败|失败|请在|无法|超时|未找到|异常|失去前台焦点|发生变化|未发送|未绑定/u.test(status)
+          ? 'error'
+          : /已绑定|已自动恢复|连接正常|已发送|权限正常|已打开/u.test(status)
+            ? 'success'
+            : '';
+  actionPanelStatus.dataset.tone = tone || inferredTone;
   if (payload?.bound && payload.taskTitle) {
     actionPanelStatus.title = `当前绑定：${payload.taskTitle}`;
   } else if (!payload?.bound) {
@@ -1174,20 +1200,22 @@ document.addEventListener('mousedown', event => {
     return;
   }
   if (event.button !== 0) return;
+  // Start delivery immediately; the crack animation and sound are local
+  // feedback and must never delay or race the desktop focus transaction.
+  const request = window.bridge.whipCrack();
   triggerCrackAnimation();
   scheduleFrame();
-  playCrackSound();
-  setTimeout(() => {
-    window.bridge.whipCrack()
-      .then(result => {
-        lastCrackResult = result || { status: 'failed', code: 'EMPTY_RESPONSE' };
-        document.body.dataset.whipStatus = lastCrackResult.status;
-      })
-      .catch(() => {
-        lastCrackResult = { status: 'failed', code: 'IPC_FAILED' };
-        document.body.dataset.whipStatus = lastCrackResult.status;
-      });
-  }, CRACK_SEND_DELAY_MS);
+  request
+    .then(result => {
+      playCrackSound();
+      lastCrackResult = result || { status: 'failed', code: 'EMPTY_RESPONSE' };
+      document.body.dataset.whipStatus = lastCrackResult.status;
+    })
+    .catch(() => {
+      playCrackSound();
+      lastCrackResult = { status: 'failed', code: 'IPC_FAILED' };
+      document.body.dataset.whipStatus = lastCrackResult.status;
+    });
 });
 
 document.addEventListener('contextmenu', event => event.preventDefault());

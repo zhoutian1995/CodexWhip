@@ -88,5 +88,5 @@ test('macOS helper keeps semantic fallbacks for the current AX shape', () => {
   assert.match(helper, /for _ in 0\.\.<6/u);
   assert.match(helper, /if candidates\.isEmpty && arguments\.mode == "probe"/u);
   assert.match(helper, /_ = activate\(codexApp\)/u);
-  assert.match(helper, /candidateForTask\(currentCandidates, windowId: initialWindowId/u);
+  assert.match(helper, /composerText\(selected\.composer\)/u);
 });

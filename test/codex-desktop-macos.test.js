@@ -97,13 +97,12 @@ test('Swift helper performs final identity, focus, draft and delivery checks', (
   assert.match(helper, /var score = activeClass \? 320 : 0/u);
   assert.match(helper, /verifyIdentity\(selected, arguments: arguments\)/u);
   assert.match(helper, /selected\.composerRuntimeId == initialComposerRuntimeId/u);
-  assert.match(helper, /guard selected\.draftText\.isEmpty/u);
+  assert.match(helper, /composerText\(selected\.composer\)\.isEmpty/u);
   assert.match(helper, /NSWorkspace\.shared\.frontmostApplication/u);
-  assert.match(helper, /focusComposer\(beforeSubmit\.composer, pid: codexApp\.processIdentifier\)/u);
+  assert.match(helper, /focusComposer\(selected\.composer, pid: codexApp\.processIdentifier\)/u);
   assert.match(helper, /AXUIElementCreateApplication\(pid\)/u);
   assert.match(helper, /func clickComposer\(_ composer: AXUIElement\)/u);
-  assert.match(helper, /afterIds\.subtracting\(beforeMessageIds\)/u);
-  assert.match(helper, /newIds\.count > 1/u);
+  assert.match(helper, /finalDraft = composerText\(selected\.composer\)/u);
   assert.match(helper, /Codex often rebuilds the composer after Enter/u);
   assert.match(helper, /DELIVERY_UNCONFIRMED/u);
 });

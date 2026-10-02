@@ -137,9 +137,7 @@ test('overlay stays visible after left click and supports three close controls',
     /document\.addEventListener\('mousedown',[\s\S]*?\n\}\);/u
   )?.[0] || '';
   assert.match(mouseDownHandler, /triggerCrackAnimation\(\)/u);
-  assert.match(mouseDownHandler, /setTimeout\(\(\)\s*=>\s*\{/u);
-  assert.match(mouseDownHandler, /window\.bridge\.whipCrack\(\)/u);
-  assert.match(mouseDownHandler, /CRACK_SEND_DELAY_MS/u);
+  assert.match(mouseDownHandler, /const request = window\.bridge\.whipCrack\(\)/u);
   assert.doesNotMatch(overlay, /document\.addEventListener\('mouseup'/u);
   assert.doesNotMatch(
     overlay,

@@ -135,10 +135,10 @@ function getTrayIcon() {
   return createTrayIconFallback();
 }
 
-function requestMacAccessibilityPermission(prompt = true) {
+function requestMacAccessibilityPermission(prompt = true, { announce = true } = {}) {
   if (process.platform !== 'darwin') return true;
   const trusted = systemPreferences.isTrustedAccessibilityClient(prompt);
-  if (tray) {
+  if (tray && announce) {
     setTrayStatus(trusted
       ? 'macOS 辅助功能权限正常'
       : '请在系统设置 > 隐私与安全性 > 辅助功能中启用 CodexWhip');
@@ -662,6 +662,12 @@ function revealOverlay() {
 
 async function lowerOverlayForDesktopSend() {
   if (!isOverlayVisible()) return;
+  // A real canvas click makes the transparent BrowserWindow frontmost. Blur
+  // it before the native helper activates Codex; an IPC call from DevTools
+  // does not reproduce that focus transition, which is why direct tests used
+  // to pass while an actual whip click could report TARGET_WINDOW_NOT_ACTIVE.
+  if (typeof overlay.blur === 'function') overlay.blur();
+  if (typeof overlay.setFocusable === 'function') overlay.setFocusable(false);
   overlay.setIgnoreMouseEvents(true);
   // Keep the renderer alive and visually continuous while Codex receives
   // focus. Hiding/showing the full-screen transparent window on every whip
@@ -677,6 +683,7 @@ function restoreOverlayAfterDesktopSend() {
   if (!isOverlayUsable()) return;
   const restoreVisibility = overlayHiddenForDesktopSend;
   overlayHiddenForDesktopSend = false;
+  if (typeof overlay.setFocusable === 'function') overlay.setFocusable(true);
   overlay.setAlwaysOnTop(true, 'floating');
   overlay.setIgnoreMouseEvents(false);
   if (restoreVisibility && !overlay.isVisible()) {
@@ -791,16 +798,16 @@ if (!hasSingleInstanceLock) {
     tray.on('click', toggleOverlay);
 
     const savedBinding = loadBinding(bindingFilePath);
-    const accessibilityReady = requestMacAccessibilityPermission(true);
+    // Do not let Electron's synchronous TCC snapshot paint a red error while
+    // the Accessibility helper is still restoring the saved Codex task. The
+    // helper result is the source of truth; a real permission failure is
+    // surfaced by the bind/probe action itself.
+    requestMacAccessibilityPermission(false, { announce: false });
     await restoreSavedSession({ quiet: savedBinding.ok });
     if (!boundSession && savedBinding.ok) scheduleSavedSessionRestore();
-    // Do not overwrite a successful restore, or a more useful AX probe error,
-    // with a stale synchronous TCC result. On macOS the helper can be trusted
-    // through the app bundle while systemPreferences briefly reports false
-    // after a reinstall or a Settings toggle.
-    if (!accessibilityReady && !boundSession && !savedBinding.ok && trayStatus === '未绑定任务') {
-      setTrayStatus('请先授予 macOS 辅助功能权限，再绑定 Codex 任务');
-    }
+    // Do not paint a red permission error from Electron's synchronous TCC
+    // snapshot. The bind/probe helper is the source of truth and reports a
+    // real permission failure when the user actually asks to bind.
     if (!steerModeResult.ok) {
       setTrayStatus(`直接发送未启用：${statusForResult(steerModeResult)}`);
     }

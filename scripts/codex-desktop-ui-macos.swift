@@ -757,30 +757,18 @@ if !selected.draftText.isEmpty {
 }
 let initialWindowId = selected.windowId
 let initialComposerRuntimeId = selected.composerRuntimeId
-let beforeMessageIds = matchingTextRuntimeIds(
-    in: selected.window,
-    text: arguments.expectedText,
-    excluding: selected.composer
-)
 
 guard activate(codexApp) else {
     emit(false, "TARGET_WINDOW_NOT_ACTIVE", ["hwnd": initialWindowId, "stage": "activate"])
 }
 raiseWindow(selected.window)
 usleep(120_000)
-
-candidates = allCandidates(app: codexApp, targetTitle: arguments.targetTaskTitle)
-guard let activated = candidates.first(where: { $0.windowId == initialWindowId }) ??
-    candidates.first(where: { sameTask($0, as: selected.task) }) ??
-    selectCandidate(candidates, arguments: arguments) else {
-    emit(false, "TARGET_WINDOW_NOT_ACTIVE", ["hwnd": initialWindowId, "stage": "raise"])
-}
-selected = activated
-verifyIdentity(selected, arguments: arguments)
-guard selected.composerRuntimeId == initialComposerRuntimeId else {
-    emit(false, "COMPOSER_CHANGED", ["hwnd": selected.windowId])
-}
-guard selected.draftText.isEmpty else {
+// Keep using the verified AX window/composer from the probe. Rebuilding the
+// entire Codex accessibility tree three more times here made a large task
+// feel frozen and could turn a valid click into a timeout. AX operations on
+// this verified composer still fail safely if Codex rebuilt it meanwhile.
+guard selected.composerRuntimeId == initialComposerRuntimeId,
+      composerText(selected.composer).isEmpty else {
     emit(false, "DRAFT_PRESENT", ["hwnd": selected.windowId])
 }
 guard focusComposer(selected.composer, pid: codexApp.processIdentifier) else {
@@ -794,48 +782,31 @@ guard let inputMethod = setComposerText(
     emit(false, "SUBMIT_TEXT_NOT_FOUND", ["hwnd": selected.windowId])
 }
 usleep(100_000)
-
-candidates = allCandidates(app: codexApp, targetTitle: arguments.targetTaskTitle)
-guard let beforeSubmit = candidateForTask(candidates, windowId: initialWindowId, task: selected.task) else {
-    emit(false, "TARGET_WINDOW_NOT_ACTIVE", ["hwnd": initialWindowId, "stage": "composer-recheck"])
-}
-verifyIdentity(beforeSubmit, arguments: arguments)
-guard beforeSubmit.composerRuntimeId == initialComposerRuntimeId else {
-    emit(false, "COMPOSER_CHANGED", ["hwnd": beforeSubmit.windowId])
-}
-guard composerText(beforeSubmit.composer) == arguments.expectedText else {
-    emit(false, "DRAFT_CHANGED", ["hwnd": beforeSubmit.windowId])
+guard composerText(selected.composer) == arguments.expectedText else {
+    emit(false, "DRAFT_CHANGED", ["hwnd": selected.windowId])
 }
 guard activate(codexApp),
-      focusComposer(beforeSubmit.composer, pid: codexApp.processIdentifier) else {
-    emit(false, "FOCUS_FAILED", ["hwnd": beforeSubmit.windowId])
+      focusComposer(selected.composer, pid: codexApp.processIdentifier) else {
+    emit(false, "FOCUS_FAILED", ["hwnd": selected.windowId])
 }
 guard pressEnter(pid: codexApp.processIdentifier) else {
-    emit(false, "SUBMIT_FAILED", ["hwnd": beforeSubmit.windowId])
+    emit(false, "SUBMIT_FAILED", ["hwnd": selected.windowId])
 }
 
 var finalDraft = arguments.expectedText
 for _ in 0..<25 {
     usleep(100_000)
-    let currentCandidates = allCandidates(app: codexApp, targetTitle: arguments.targetTaskTitle)
-    guard let current = candidateForTask(currentCandidates, windowId: initialWindowId, task: selected.task) else { continue }
-    verifyIdentity(current, arguments: arguments)
     // Codex often rebuilds the composer after Enter; delivery proof is the
-    // message id plus an empty draft, so do not treat that expected
-    // replacement as a send failure.
-    finalDraft = current.draftText
-    let afterIds = matchingTextRuntimeIds(in: current.window, text: arguments.expectedText, excluding: current.composer)
-    let newIds = afterIds.subtracting(beforeMessageIds)
-    if newIds.count > 1 {
-        emit(false, "DELIVERY_AMBIGUOUS", ["hwnd": current.windowId, "candidateCount": newIds.count])
-    }
-    if finalDraft.isEmpty, let messageRuntimeId = newIds.first {
+    // empty composer. Do not scan the entire conversation before accepting
+    // that proof: large Codex tasks can expose tens of thousands of AX nodes,
+    // and a full message-id scan makes one whip look like a frozen screen.
+    finalDraft = composerText(selected.composer)
+    if finalDraft.isEmpty {
         emit(true, "DIRECT_STEERED", [
-            "hwnd": current.windowId,
+            "hwnd": selected.windowId,
             "processId": codexApp.processIdentifier,
             "inputMethod": inputMethod,
             "draftVerification": "EMPTY_AFTER_SUBMIT",
-            "messageRuntimeId": messageRuntimeId,
         ])
     }
 }
