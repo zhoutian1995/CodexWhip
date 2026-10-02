@@ -169,6 +169,9 @@ test('overlay stays visible after left click and supports three close controls',
   assert.match(main, /afterDesktopSendFn:\s*restoreOverlayAfterDesktopSend/u);
   assert.match(main, /setIgnoreMouseEvents\(true\)/u);
   assert.match(main, /setAlwaysOnTop\(false\)/u);
+  assert.match(main, /setAlwaysOnTop\(true, 'floating'\)/u);
+  assert.match(main, /setVisibleOnAllWorkspaces\(true, \{ visibleOnFullScreen: true \}\)/u);
+  assert.match(main, /overlay\.show\(\);\s*if \(typeof overlay\.moveTop/u);
   assert.match(main, /setIgnoreMouseEvents\(false\)/u);
   assert.match(main, /webContents\.send\('refresh-whip', stylePayload/u);
   assert.match(main, /label: `鞭子款式：\$\{selectedStyleLabel\(\)\}`/u);

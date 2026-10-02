@@ -263,7 +263,12 @@ function selectWhipStyle(styleId) {
   selectedWhipStyle = styleId;
   activeWhipStyle = resolveWhipStyle(selectedWhipStyle);
   const saved = saveSettings(settingsFilePath, { whipStyle: selectedWhipStyle });
-  if (isOverlayVisible() && overlayReady) {
+  // Keep the renderer's selected style in sync even while the overlay is
+  // temporarily hidden (for example after a send or when the tray menu is
+  // used before summoning the whip).  The next summon also sends a spawn
+  // event, but updating the loaded page here prevents a stale first style
+  // label/physics state from surviving into that summon.
+  if (isOverlayUsable() && overlayReady) {
     overlay.webContents.send('refresh-whip', stylePayload({ respawn: true }));
   }
   setTrayStatus(saved.ok
@@ -428,7 +433,9 @@ function createOverlay() {
     backgroundColor: '#00000000',
     frame: false,
     alwaysOnTop: true,
-    focusable: false,
+    // A focusable window is required for macOS to place a transparent window
+    // on the active Space reliably when the app is a background tray app.
+    focusable: true,
     skipTaskbar: true,
     resizable: false,
     hasShadow: false,
@@ -439,7 +446,14 @@ function createOverlay() {
       sandbox: true,
     },
   });
-  overlay.setAlwaysOnTop(true, 'screen-saver');
+  // A screen-saver level window is visually present but is omitted by some
+  // macOS display capture paths, which makes the whip look like it failed to
+  // summon during recording.  Floating keeps it above Codex while remaining
+  // part of the normal desktop composition.
+  overlay.setAlwaysOnTop(true, 'floating');
+  if (process.platform === 'darwin') {
+    overlay.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  }
   overlayReady = false;
   overlay.webContents.on('did-finish-load', () => {
     overlayReady = true;
@@ -519,6 +533,7 @@ function revealOverlay() {
 
   activeWhipStyle = resolveWhipStyle(selectedWhipStyle);
   overlay.show();
+  if (typeof overlay.moveTop === 'function') overlay.moveTop();
   registerEscapeShortcut();
   if (overlayReady) {
     overlay.webContents.send('spawn-whip', stylePayload());
@@ -546,9 +561,13 @@ function restoreOverlayAfterDesktopSend() {
   if (!isOverlayUsable()) return;
   const restoreVisibility = overlayHiddenForDesktopSend;
   overlayHiddenForDesktopSend = false;
-  overlay.setAlwaysOnTop(true, 'screen-saver');
+  overlay.setAlwaysOnTop(true, 'floating');
   overlay.setIgnoreMouseEvents(false);
-  if (restoreVisibility) overlay.showInactive();
+  if (restoreVisibility) {
+    if (typeof overlay.showInactive === 'function') overlay.showInactive();
+    else overlay.show();
+    if (typeof overlay.moveTop === 'function') overlay.moveTop();
+  }
   if (overlay.isVisible()) {
     setTimeout(() => {
       if (isOverlayVisible() && overlayReady) {

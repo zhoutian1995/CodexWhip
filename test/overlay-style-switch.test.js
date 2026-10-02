@@ -36,3 +36,14 @@ test('preload exposes the guarded style selection IPC request', () => {
   assert.match(main, /selectedStyleId:\s*selectedWhipStyle/u);
   assert.match(main, /styleCatalog:\s*getStyleCatalog\(\)/u);
 });
+
+test('style selection refreshes a loaded overlay even when it is hidden', () => {
+  assert.match(
+    main,
+    /if \(isOverlayUsable\(\) && overlayReady\) \{\s*overlay\.webContents\.send\('refresh-whip', stylePayload\(\{ respawn: true \}\)\);/u
+  );
+  assert.doesNotMatch(
+    main,
+    /if \(isOverlayVisible\(\) && overlayReady\) \{\s*overlay\.webContents\.send\('refresh-whip', stylePayload\(\{ respawn: true \}\)\);/u
+  );
+});
