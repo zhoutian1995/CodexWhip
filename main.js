@@ -546,6 +546,7 @@ function createOverlay() {
   overlayReady = false;
   overlay.webContents.on('did-finish-load', () => {
     overlayReady = true;
+    overlay.webContents.send('overlay-mode', overlayMode);
     overlay.webContents.send('overlay-status', {
       status: trayStatus,
       bound: Boolean(boundSession),
@@ -641,20 +642,20 @@ function toggleOverlay() {
   revealOverlay();
 }
 
-function revealOverlay() {
+function revealOverlay({ showWhip = true } = {}) {
   clearTimeout(dropHideTimer);
   dropHideTimer = null;
   if (!isOverlayUsable()) createOverlay();
   if (!isOverlayUsable()) return;
 
-  setOverlayMode('stage');
+  setOverlayMode(showWhip ? 'stage' : 'controls');
   activeWhipStyle = resolveWhipStyle(selectedWhipStyle);
   overlay.show();
   if (typeof overlay.moveTop === 'function') overlay.moveTop();
   registerEscapeShortcut();
-  if (overlayReady) {
+  if (showWhip && overlayReady) {
     overlay.webContents.send('spawn-whip', stylePayload());
-  } else {
+  } else if (showWhip) {
     spawnQueued = true;
   }
   refreshTrayMenu();
@@ -818,7 +819,10 @@ if (!hasSingleInstanceLock) {
       setTrayStatus('款式设置无效，已恢复黑红长皮鞭');
     }
 
-    revealOverlay();
+    // Start in the compact control dock. The full-screen canvas is created
+    // only when the user explicitly summons the whip, which keeps camera and
+    // screen-recording compositors responsive while CodexWhip is idle.
+    revealOverlay({ showWhip: false });
     if (revealOverlayOnReady) {
       revealOverlayOnReady = false;
       revealOverlay();

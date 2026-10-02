@@ -45,3 +45,13 @@ test('preload and main wire the visible action panel to existing desktop actions
   assert.match(main, /当前窗口没有 Codex 输入框/u);
   assert.match(main, /execFile\('\/usr\/bin\/open', \['-a', 'TextEdit'/u);
 });
+
+test('overlay keeps the recording path light until the whip is summoned', () => {
+  assert.match(overlay, /let overlayMode = 'controls'/u);
+  assert.match(overlay, /canvas\.width = overlayMode === 'stage' \? Math\.max\(1, Math\.floor\(W \* renderScale\)\) : 1/u);
+  assert.match(overlay, /canvas\.height = overlayMode === 'stage' \? Math\.max\(1, Math\.floor\(H \* renderScale\)\) : 1/u);
+  assert.match(overlay, /window\.bridge\.onOverlayMode\(mode =>/u);
+  assert.match(preload, /onOverlayMode:/u);
+  assert.match(main, /revealOverlay\(\{ showWhip: false \}\)/u);
+  assert.match(main, /overlay\.webContents\.send\('overlay-mode', overlayMode\)/u);
+});

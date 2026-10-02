@@ -13,5 +13,6 @@ contextBridge.exposeInMainWorld('bridge', {
   onSpawnWhip: (fn) => ipcRenderer.on('spawn-whip', (_event, payload) => fn(payload)),
   onRefreshWhip: (fn) => ipcRenderer.on('refresh-whip', (_event, payload) => fn(payload)),
   onDropWhip: (fn) => ipcRenderer.on('drop-whip', () => fn()),
+  onOverlayMode: (fn) => ipcRenderer.on('overlay-mode', (_event, mode) => fn(mode)),
   onOverlayStatus: (fn) => ipcRenderer.on('overlay-status', (_event, payload) => fn(payload)),
 });

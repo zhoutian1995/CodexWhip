@@ -7,7 +7,11 @@
   *, *::before, *::after { box-sizing: border-box; }
   * { margin: 0; padding: 0; cursor: none; }
   html, body { overflow: hidden; background: transparent; width: 100%; height: 100%; }
-  canvas { display: block; }
+  /* Keep the transparent overlay full-screen, but let the backing bitmap be
+     capped below 4K. A 2560×1440 canvas costs a large GPU texture while a
+     camera/recording app is already compositing video; CSS scales this
+     lightweight bitmap back to the display without changing the hit surface. */
+  canvas { display: block; width: 100vw; height: 100vh; }
 
   /* The overlay is intentionally click-through everywhere except this small
      control. It keeps style switching discoverable without competing with
@@ -305,6 +309,8 @@ const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d', { alpha: true });
 let W = 0;
 let H = 0;
+let renderScale = 1;
+let overlayMode = 'controls';
 let previousDrawBounds = null;
 let activeStyle = FALLBACK_STYLE;
 let P = { ...BASE_PHYSICS, ...activeStyle.physics };
@@ -546,8 +552,14 @@ function fillHitSurface(x, y, width, height) {
 }
 
 function resize() {
-  W = canvas.width = window.innerWidth;
-  H = canvas.height = window.innerHeight;
+  W = window.innerWidth;
+  H = window.innerHeight;
+  renderScale = overlayMode === 'stage'
+    ? Math.min(1, 1920 / Math.max(1, W), 1080 / Math.max(1, H))
+    : 1;
+  canvas.width = overlayMode === 'stage' ? Math.max(1, Math.floor(W * renderScale)) : 1;
+  canvas.height = overlayMode === 'stage' ? Math.max(1, Math.floor(H * renderScale)) : 1;
+  ctx.setTransform(renderScale, 0, 0, renderScale, 0, 0);
   previousDrawBounds = null;
   fillHitSurface(0, 0, W, H);
 }
@@ -1225,11 +1237,19 @@ window.addEventListener('resize', () => {
 });
 
 window.bridge.onSpawnWhip(payload => {
+  if (overlayMode !== 'stage') {
+    overlayMode = 'stage';
+    resize();
+  }
   setActiveStyle(payload?.styleId, payload?.style, payload?.selectedStyleId || payload?.styleId);
   resetWhipState(mouseX || W / 2, mouseY || H / 2);
 });
 
 window.bridge.onRefreshWhip(payload => {
+  if (overlayMode !== 'stage') {
+    overlayMode = 'stage';
+    resize();
+  }
   const nextStyleId = payload?.styleId || activeStyle.id;
   const styleChanged = nextStyleId !== activeStyle.id;
   const selectedStyleId = payload?.selectedStyleId || payload?.styleId || selectedStyleChoice;
@@ -1244,6 +1264,18 @@ window.bridge.onRefreshWhip(payload => {
 });
 
 window.bridge.onDropWhip(startDropping);
+window.bridge.onOverlayMode(mode => {
+  overlayMode = mode === 'stage' ? 'stage' : 'controls';
+  if (overlayMode === 'controls') {
+    whip = null;
+    dropping = false;
+    closing = false;
+    crackPulse = 0;
+    document.body.dataset.whipStatus = 'idle';
+  }
+  resize();
+  scheduleFrame();
+});
 
 resize();
 setActiveStyle('leather', undefined, 'leather');
