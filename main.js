@@ -293,8 +293,30 @@ function sessionFromProbe(result) {
   };
 }
 
+async function probeCodexForAction(options = {}) {
+  const wasVisible = isOverlayVisible();
+  if (wasVisible) await lowerOverlayForDesktopSend();
+
+  try {
+    let result = await probeCodexDesktop(options);
+    // The overlay can be the frontmost window while the user clicks Bind.
+    // Give macOS one permission refresh and one extra AX-tree sample before
+    // reporting a permission failure that may only be stale TCC state.
+    if (result.code === 'ACCESSIBILITY_PERMISSION_REQUIRED') {
+      const trusted = requestMacAccessibilityPermission(true);
+      if (trusted) {
+        await new Promise(resolve => setTimeout(resolve, 300));
+        result = await probeCodexDesktop(options);
+      }
+    }
+    return result;
+  } finally {
+    if (wasVisible) restoreOverlayAfterDesktopSend();
+  }
+}
+
 async function bindCurrentSession() {
-  const result = await probeCodexDesktop();
+  const result = await probeCodexForAction();
   if (!result.ok) {
     const message = `绑定失败：${statusForResult(result)}`;
     setTrayStatus(message);
@@ -351,7 +373,7 @@ async function testCodexConnection() {
     return { ok: false, code: 'TARGET_SESSION_REQUIRED', message };
   }
 
-  const result = await probeCodexDesktop({
+  const result = await probeCodexForAction({
     preferredHwnd: boundSession.hwnd,
     targetTaskTitle: boundSession.taskTitle,
     targetTaskRuntimeId: boundSession.taskRuntimeId,

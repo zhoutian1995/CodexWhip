@@ -685,17 +685,22 @@ if candidates.isEmpty && arguments.mode == "probe" {
     usleep(240_000)
     candidates = allCandidates(app: codexApp, targetTitle: arguments.targetTaskTitle)
 }
-guard !candidates.isEmpty else { emit(false, "CODEX_MODE_NOT_FOUND") }
 if arguments.mode == "probe" {
     if let stable = stableCandidate(
         app: codexApp,
         targetTitle: arguments.targetTaskTitle,
-        arguments: arguments
+        arguments: arguments,
+        attempts: 8,
+        interval: 220_000
     ) {
         candidates = [stable]
+    } else if candidates.isEmpty {
+        emit(false, "CODEX_MODE_NOT_FOUND")
     } else {
         emit(false, "SESSION_NOT_STABLE")
     }
+} else {
+    guard !candidates.isEmpty else { emit(false, "CODEX_MODE_NOT_FOUND") }
 }
 guard var selected = selectCandidate(candidates, arguments: arguments) else {
     emit(false, "AMBIGUOUS_WINDOWS", ["candidateCount": candidates.count])
