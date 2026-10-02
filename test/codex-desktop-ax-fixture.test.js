@@ -66,6 +66,10 @@ test('macOS helper keeps semantic fallbacks for the current AX shape', () => {
   const helper = fs.readFileSync(HELPER_PATH, 'utf8');
   assert.match(helper, /AXWebArea/u);
   assert.match(helper, /activeDocumentTitles/u);
+  assert.match(helper, /func activeDocumentTask\(in nodes: \[AXUIElement\]/u);
+  assert.ok(helper.includes('task:document-title:\\(title)'), 'collapsed AX sessions use a title-based task identity');
+  assert.match(helper, /return activeDocumentTask\(in: nodes, windowFrame: windowFrame\)/u);
+  assert.match(helper, /let activeTitles = activeDocumentTitles\(in: nodes, windowFrame: windowFrame\)/u);
   assert.match(helper, /app-action-sidebar-thread-selected/u);
   assert.match(helper, /func hasClassToken/u);
   assert.match(helper, /hasClassToken\(classes, "bg-token-list-hover-background"\)/u);

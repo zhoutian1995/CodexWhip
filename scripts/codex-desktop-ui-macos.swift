@@ -311,6 +311,32 @@ func activeDocumentTitles(in nodes: [AXUIElement], windowFrame: FrameInfo?) -> S
     return Set(areas.filter { $0.2 >= largestArea * 0.60 }.map { $0.0 })
 }
 
+/// Newer ChatGPT/Codex builds can hide the sidebar from the accessibility
+/// tree. In that state the active conversation is exposed only as one large
+/// AXWebArea next to the Codex composer. Use that title as the task identity
+/// only when it is unique in the active document areas; this keeps the
+/// fallback deterministic instead of guessing among multiple conversations.
+func activeDocumentTask(in nodes: [AXUIElement], windowFrame: FrameInfo?) -> TaskIdentity? {
+    let titles = activeDocumentTitles(in: nodes, windowFrame: windowFrame)
+    guard titles.count == 1, let title = titles.first else { return nil }
+    let areas = nodes.filter {
+        stringAttribute($0, kAXRoleAttribute) == "AXWebArea" &&
+        normalized(elementName($0)) == title
+    }
+    guard let area = areas.max(by: { lhs, rhs in
+        let left = frameOf(lhs).map { max(0, $0.width) * max(0, $0.height) } ?? 0
+        let right = frameOf(rhs).map { max(0, $0.width) * max(0, $0.height) } ?? 0
+        return left < right
+    }) else { return nil }
+    return TaskIdentity(
+        title: title,
+        // A title-based ID remains stable when the renderer rebuilds its AX
+        // nodes after sending a message.
+        runtimeId: "task:document-title:\(title)",
+        element: area
+    )
+}
+
 func findTask(in nodes: [AXUIElement], windowFrame: FrameInfo?, windowTitle: String = "") -> TaskIdentity? {
     let documentTitles = activeDocumentTitles(in: nodes, windowFrame: windowFrame)
     let normalizedWindowTitle = normalized(windowTitle)
@@ -366,7 +392,9 @@ func findTask(in nodes: [AXUIElement], windowFrame: FrameInfo?, windowTitle: Str
             element: element
         )))
     }
-    guard let bestScore = matches.map({ $0.0 }).max() else { return nil }
+    guard let bestScore = matches.map({ $0.0 }).max() else {
+        return activeDocumentTask(in: nodes, windowFrame: windowFrame)
+    }
     let bestMatches = matches.filter { $0.0 == bestScore }
     // Do not guess if two nodes claim to be the active task. This protects
     // delivery when a new UI exposes duplicate accessibility representations.
@@ -374,7 +402,7 @@ func findTask(in nodes: [AXUIElement], windowFrame: FrameInfo?, windowTitle: Str
     return bestMatches[0].1
 }
 
-func taskTitleMatchCount(in nodes: [AXUIElement], title: String) -> Int {
+func taskTitleMatchCount(in nodes: [AXUIElement], title: String, windowFrame: FrameInfo?) -> Int {
     guard !title.isEmpty else { return 0 }
     var ids = Set<String>()
     for element in nodes {
@@ -382,7 +410,9 @@ func taskTitleMatchCount(in nodes: [AXUIElement], title: String) -> Int {
         guard classes.contains("sidebar-item"), !classes.contains("folder-row") else { continue }
         if normalized(elementName(element)) == title { ids.insert(runtimeId(element, prefix: "task")) }
     }
-    return ids.count
+    if !ids.isEmpty { return ids.count }
+    let activeTitles = activeDocumentTitles(in: nodes, windowFrame: windowFrame)
+    return activeTitles.count == 1 && activeTitles.contains(title) ? 1 : 0
 }
 
 func analyzeWindow(_ window: AXUIElement, app: NSRunningApplication, targetTitle: String) -> CodexCandidate? {
@@ -419,7 +449,11 @@ func analyzeWindow(_ window: AXUIElement, app: NSRunningApplication, targetTitle
         composer: composer,
         composerRuntimeId: runtimeId(composer, prefix: "composer"),
         task: task,
-        taskTitleMatchCount: taskTitleMatchCount(in: nodes, title: titleForCount),
+        taskTitleMatchCount: taskTitleMatchCount(
+            in: nodes,
+            title: titleForCount,
+            windowFrame: windowFrame
+        ),
         draftText: composerText(composer)
     )
 }
